@@ -5,8 +5,12 @@ to SOURCE_BUILDERS and passing this file unmodified.
 
 from __future__ import annotations
 
-from tracker_agent.core.capabilities import Capability
-from tracker_agent.core.models import Annotation
+import datetime as dt
+
+import pytest
+
+from tracker_agent.core.capabilities import Capability, CapabilityError
+from tracker_agent.core.models import Annotation, Answer, Brief
 
 PROJECT = "demo-1"
 
@@ -78,3 +82,48 @@ def test_write_annotations_rejects_unknown_field(source):
     except ValueError:
         return
     raise AssertionError("expected write_annotations to refuse a non-agent field")
+
+
+def test_undeclared_capabilities_raise_capability_error(source):
+    """The capability flags are the source of truth, not a stack trace.
+
+    For every capability-gated method the source declares it can't do,
+    calling it must raise CapabilityError — never NotImplementedError,
+    never silently succeed. A feature that only checks `capabilities`
+    must never be surprised.
+    """
+    framing = None
+    if Capability.READ_ITEMS in source.capabilities:
+        framing = next((i for i in source.items(PROJECT).items if i.title == "Rough framing"), None)
+    fake_item_id = framing.id if framing else "nonexistent"
+
+    checks = {
+        Capability.WRITE_BRIEF: lambda: source.write_brief(
+            Brief(
+                project=PROJECT,
+                generated_at=dt.datetime.now(),
+                snapshot="",
+                by_group=[],
+                waiting_on={},
+                cycle_stats={},
+            ),
+            dry_run=True,
+        ),
+        Capability.QUESTIONS: lambda: source.questions(PROJECT),
+        Capability.WRITE_ANNOTATIONS: lambda: source.write_annotations(
+            PROJECT, [Annotation(item_id=fake_item_id, field="flag", value="x")], dry_run=True
+        ),
+    }
+
+    for capability, call in checks.items():
+        if capability in source.capabilities:
+            continue
+        with pytest.raises(CapabilityError):
+            call()
+
+
+def test_undeclared_answer_question_raises_capability_error(source):
+    if Capability.QUESTIONS in source.capabilities:
+        return
+    with pytest.raises(CapabilityError):
+        source.answer_question("nonexistent", Answer(text="x"), dry_run=True)

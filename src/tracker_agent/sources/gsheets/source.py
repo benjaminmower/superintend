@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 
 from tracker_agent.config import SheetConfig, SpreadsheetConfig
-from tracker_agent.core.capabilities import Capability
+from tracker_agent.core.capabilities import Capability, requires
 from tracker_agent.core.models import (
     Annotation,
     Answer,
@@ -36,6 +36,9 @@ from tracker_agent.sources.gsheets.raw import (
 
 class GSheetsSource(TrackerSource):
     name = "gsheets"
+    # Only what's implemented today. A feature that needs WRITE_BRIEF or
+    # QUESTIONS must see that absence in capabilities and degrade — never
+    # discover it by catching NotImplementedError from this adapter.
     capabilities = Capability.READ_ITEMS | Capability.READ_HISTORY | Capability.WRITE_ANNOTATIONS
 
     def __init__(self, client: SheetClient, sheet_config: SheetConfig):
@@ -85,6 +88,7 @@ class GSheetsSource(TrackerSource):
     def write_annotations(
         self, project: str, annotations: list[Annotation], *, dry_run: bool
     ) -> WriteResult:
+        requires(self.capabilities, Capability.WRITE_ANNOTATIONS)
         self._spreadsheet_for(project)
         latest = self._latest_tab()
         result = parse_weekly_tab(self._client, latest, project, self._sheet_config)
@@ -104,10 +108,17 @@ class GSheetsSource(TrackerSource):
         return WriteResult(ok=True, written=len(cell_updates), dry_run=dry_run)
 
     def write_brief(self, brief: Brief, *, dry_run: bool) -> WriteResult:
-        raise NotImplementedError("GSheetsSource.write_brief: Phase 2 (see SPEC.md)")
+        # Not yet in `capabilities` (Phase 2), so `requires` raises
+        # CapabilityError here — callers should have checked first.
+        requires(self.capabilities, Capability.WRITE_BRIEF)
+        raise AssertionError("unreachable: WRITE_BRIEF is not declared")
 
     def questions(self, project: str | None = None) -> list[Question]:
-        raise NotImplementedError("GSheetsSource.questions: Phase 4 (see SPEC.md)")
+        # Not yet in `capabilities` (Phase 4).
+        requires(self.capabilities, Capability.QUESTIONS)
+        raise AssertionError("unreachable: QUESTIONS is not declared")
 
     def answer_question(self, question_id: str, answer: Answer, *, dry_run: bool) -> WriteResult:
-        raise NotImplementedError("GSheetsSource.answer_question: Phase 4 (see SPEC.md)")
+        # Not yet in `capabilities` (Phase 4).
+        requires(self.capabilities, Capability.QUESTIONS)
+        raise AssertionError("unreachable: QUESTIONS is not declared")

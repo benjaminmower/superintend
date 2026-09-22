@@ -30,19 +30,26 @@ Claude Code cannot do this part.
 5. Note the service account's **email address**, shown on its details page.
    It looks like `tracker-agent@<project-id>.iam.gserviceaccount.com`.
 
-## 4. Make a demo copy of the tracker
+## 4. Create the demo spreadsheet
 
-1. Open the real tracker sheet.
-2. **File → Make a copy**, name it something like `Tracker (demo)`.
-3. Replace every real project name, address, and note with invented data —
-   this copy is what all development and the public repo's screenshots use.
-   No real client or project data should ever appear in it.
-4. Copy the demo sheet's ID out of its URL: the long string between `/d/`
-   and `/edit` in `https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit`.
+Don't copy the real tracker for this — a hand-scrubbed copy is exactly how
+a real name or address ends up in the demo. Instead, generate one from
+scratch, seeded entirely with the same invented data the test fixtures
+use (`tests/fixtures/demo_sheet.py`):
 
-## 5. Share both sheets with the service account
+```bash
+uv run python scripts/make_demo_sheet.py --share you@example.com
+```
 
-For **both** the real tracker and the demo copy:
+`--share` also grants your own Google account Editor access so you can
+open it in a browser (the service account owns it by default, since it
+creates it). The script prints the new sheet's ID — save it, you'll need
+it in step 6.
+
+## 5. Share the real tracker with the service account
+
+The demo sheet is already shared (the service account created it in step
+4). For the **real** tracker:
 
 1. Open the sheet → **Share**.
 2. Paste in the service account email from step 3.5.
@@ -60,7 +67,7 @@ Copy `.env.example` to `.env` and fill in:
 ```bash
 ANTHROPIC_API_KEY=<your Anthropic API key>
 SHEET_ID=<real tracker sheet ID>
-SHEET_ID_DEMO=<demo tracker sheet ID>
+SHEET_ID_DEMO=<demo sheet ID, printed by scripts/make_demo_sheet.py>
 GOOGLE_SERVICE_ACCOUNT_FILE=credentials/service_account.json
 ```
 
