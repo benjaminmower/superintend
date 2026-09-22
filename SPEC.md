@@ -32,11 +32,15 @@ Add an AI layer to the existing Google Sheets weekly construction tracker **with
 | F | NOTES | Narrative | free text, often rich (decisions, inspector names, field changes) |
 
 ### Change log tab
-`Timestamp, User, Sheet Name, Row, Column Name, Old Value, New Value, Item (Current), Subcontractor (Current)`. It's written by an edit trigger and holds about 570 rows of history since July 2025.
+`Timestamp, User, Sheet Name, Row, Column Name, Old Value, New Value, Item (Current), Subcontractor (Current)`. It's written by an edit trigger. On the real tracker this tab is named `Changelog` (no space) and holds ~3,079 rows since the project started — `changelog_tab: auto` detection (scanning every tab's header row) works but is expensive on a sheet with 39 tabs; set `changelog_tab` explicitly per spreadsheet once you know the name (see Phase 0 notes).
 
 **Why this matters:** the change log gives us history for free. We use it for staleness, "what changed this week", time spent in each status, and replaying the sheet on past dates to backtest. **No snapshot-diffing is needed.**
 
 **Note:** edits made through the Sheets API don't fire `onEdit` triggers, so the agent's own writes won't pollute the change log. That's good, but it also means the agent's changes need their own audit trail (`run_log` plus an AI Log tab).
+
+**Real-sheet quirks found once Phase 1 ran against production data (not visible in the demo's small fixture):**
+- **STATUS is sometimes blank or wrong** while DETAILS still carries the real signal (e.g. STATUS blank + DETAILS="Cancelled"; or a DETAILS value like "Reached out" typed into STATUS by mistake). The parser infers STATUS from DETAILS when DETAILS unambiguously implies a lifecycle state (`Cancelled`, `Done!`); otherwise it falls back to `not_started` and logs why.
+- **Duplicate (SUBCONTRACTOR, ITEM) rows exist within one week** — the same task re-entered, or a genuinely different task that happens to share the exact same title and sub (observed 7 times on the real tracker, including one three-way collision). Since `item_id()` hashes `(project, group, title)` to stay stable across weeks, these collide onto one id. The parser warns loudly (`ParseWarning`, visible on `inspect`/`--dry-run`); `flags.py`/`write_annotations()` never guesses a shared flag for colliding rows — each gets `⚠️ Duplicate — consolidate with row N[, M]` in `AI Flag` and a blank `AI Next Action` instead, so a human resolves it on the sheet.
 
 ---
 
@@ -114,7 +118,10 @@ SMTP (Gmail app password) <── weekly report
 spreadsheets:
   - project_id: project-1            # slug; keep real project names out of the public repo; used in the Ask tab and RAG filters
     sheet_id_env: SHEET_ID           # real ID lives in .env
-changelog_tab: auto                  # detect by header "Timestamp, User, Sheet Name"
+    changelog_tab: "Changelog"       # optional per-spreadsheet override of changelog_tab below
+changelog_tab: auto                  # default when a spreadsheet has no override; detect by
+                                      # header "Timestamp, User, Sheet Name" (expensive on a
+                                      # sheet with many tabs — set an override once known)
 weekly_tab_regex: '^\s*(wk|week)\s*(of\s*)?(\d{1,2})/(\d{1,2})\s*$'
 ignore_tab_regex: '^copy of'
 columns:
@@ -129,11 +136,12 @@ ai_columns:                          # appended right of NOTES on the latest wee
   next_action: "AI Next Action"
 agent_tabs: ["AI Brief", "Ask", "AI Log"]   # fully agent-owned
 done_status: [Completed, Cancelled]
+done_details: ["Done!", Cancelled]   # DETAILS values meaning nobody holds the ball
 ball_in_our_court: [Need to Respond, Needs Clarification, Seeking Approval]
-waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed Up"]
+waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed Up", "Dependent On"]
 ```
 
-**Done when:** `inspect` correctly parses every weekly tab in the demo and real sheets (the item counts are plausible, no unmapped columns); tests cover tab-name variants, fill-down, year rollover, and multi-select cleanup.
+**Done when:** `inspect` correctly parses every weekly tab in the demo and real sheets (the item counts are plausible, no unmapped columns); tests cover tab-name variants, fill-down, year rollover, and multi-select cleanup. ✅ Done — verified against both the demo and the real 280-item, 51-subcontractor, 39-tab production sheet.
 
 ## Phase 1: Flags and next action (inline, on the latest weekly tab)
 
@@ -152,10 +160,18 @@ waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed U
 
 - The rules pick the flag (worst one wins). Claude writes **one** `next_action` line (≤ 100 chars) from the item, its notes, the triggered rules, and its last 3 change-log entries. Example shape: "Text <sub> for the sewer connection answer; waiting 6 days."
 - Rows with no flag and a done status get a blank next action
-- Writes go only to `AI Flag` and `AI Next Action`, in one batch; the flag cell background is colored
+- Writes go only to `AI Flag` and `AI Next Action`, in one batch (alongside one appended `AI Log` row — still one Sheets API call total). No cell background color in v1; the emoji carries severity
 - Because tabs get duplicated weekly, AI columns may carry forward from last week. Every run clears and rewrites these two columns on the latest tab, so stale text never survives a run
+- **Next actions are cached by fingerprint**, not regenerated every run: a `flag_state` table (`project_id, item_id, fingerprint, next_action`) keys on `(chosen flag, status, ball, due_date, notes)`. An item whose fingerprint hasn't changed since the last real (non-dry-run) write reuses its stored `next_action` text instead of calling the LLM again — otherwise the model paraphrases the same situation differently every run, and a rerun with nothing changed would still churn every next-action cell. `--dry-run` never reads or writes this state.
+- **Duplicate items:** if two rows on the same tab share `(SUBCONTRACTOR, ITEM)` text, `item_id()` (a hash of that pair, meant to stay stable week to week) can't tell them apart. Rather than guess a shared flag/next-action for what may be genuinely different tasks, every row sharing a collided id gets `⚠️ Duplicate — consolidate with row N[, M]` in `AI Flag` and a blank `AI Next Action`. `inspect`/`--dry-run` surface a `ParseWarning` for each collision so it's visible before any write.
+- The AI headers (`AI Flag`, `AI Next Action`) are added to the real sheet by hand, once, right of NOTES — `flag` never writes a header row. If they're missing, it stops with an actionable message rather than guessing where to put them.
 
-**Done when:** unit tests cover each rule with an injected `today`; a dry run on the demo shows the flag counts and a sample of next actions; the allow-list test proves A–F can't be written.
+**Done when:** unit tests cover each rule with an injected `today`; a dry run on the demo shows the flag counts and a sample of next actions; the allow-list test proves A–F can't be written. ✅ Done — 93 tests passing; verified end-to-end with a real, non-dry-run write against the production sheet (70 cells written across 33 flagged items + 7 duplicate-consolidation groups).
+
+**Bugs found only by running against real data** (worth remembering for later phases — the demo's small, clean fixture didn't surface any of these):
+- `call_llm`'s default `max_tokens=1024` silently truncated a 20-item next-action batch's JSON response, failing validation on every run until raised.
+- A prompt that doesn't explicitly demand JSON output gets prose back from the model; `call_llm` itself does no format-enforcement, so every caller has to spell it out in the system prompt.
+- `--dry-run` must never require state that only a real write needs (e.g. it was crashing on a missing `AI Log` tab even though dry-run never touches that tab).
 
 ## Phase 2: AI Brief tab
 
@@ -237,12 +253,13 @@ Do this once Phases 1–3 are working, not at the end. It's the phase that turns
 | Agent overwrites human data | Allow-list: AI columns on the latest weekly tab + agent-owned tabs only, enforced in one function and tested |
 | Stale AI text copied into the new week's tab | Clear and rewrite the AI columns every run; `roll-week` clears them |
 | Change log row numbers don't match after duplication | Join on (sub, item), not row |
+| Two rows share (sub, item) text within one week | Warn loudly (`inspect`/`--dry-run`); write a "consolidate with row N" flag to each instead of guessing a shared next_action |
 | Hallucinated answers | Chunk-only answering, citation validation, a not-found path, the eval |
 | Real names and address leaking | Demo spreadsheet for the repo; gitignored `data/`; fake fixtures |
 | The sheet is shared "anyone with the link" | Recommend restricting sharing to named people plus the service account |
 | Laptop asleep | launchd catches up missed runs; cloud deploy is a stretch goal |
 
-**Before anything writes to the real sheet:** confirm with the boss that project data can be sent to the Anthropic API and that two AI columns plus three tabs are OK to add.
+**Before anything writes to the real sheet:** confirm with the boss that project data can be sent to the Anthropic API and that two AI columns plus three tabs are OK to add. ✅ Done — confirmed; Phase 1 is live on the real tracker.
 
 ---
 
