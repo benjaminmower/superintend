@@ -11,6 +11,7 @@ from tracker_agent.core.models import (
     Answer,
     Brief,
     Change,
+    FieldDiff,
     Item,
     ParseResult,
     Question,
@@ -71,12 +72,29 @@ class FakeSource(TrackerSource):
         for annotation in annotations:
             if annotation.field not in _AGENT_ITEM_FIELDS:
                 raise ValueError(f"Refusing to write non-agent item field {annotation.field!r}")
+
+        diff = []
+        written = []
+        for annotation in annotations:
+            old_value = self._annotations.get(annotation.item_id, {}).get(annotation.field, "")
+            if old_value == annotation.value:
+                continue  # no-op: don't touch cells that already hold this value
+            written.append(annotation)
+            diff.append(
+                FieldDiff(
+                    item_id=annotation.item_id,
+                    field=annotation.field,
+                    old=old_value,
+                    new=annotation.value,
+                )
+            )
+
         if not dry_run:
-            for annotation in annotations:
+            for annotation in written:
                 self._annotations.setdefault(annotation.item_id, {})[annotation.field] = (
                     annotation.value
                 )
-        return WriteResult(ok=True, written=len(annotations), dry_run=dry_run)
+        return WriteResult(ok=True, written=len(written), dry_run=dry_run, diff=diff)
 
     def write_brief(self, brief: Brief, *, dry_run: bool) -> WriteResult:
         requires(self.capabilities, Capability.WRITE_BRIEF)

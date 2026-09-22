@@ -54,10 +54,35 @@ class RawChange:
             item_id=item_id(project, self.sub, self.item),
             timestamp=self.timestamp,
             user=self.user,
-            field=self.column_name,
+            field=canonical_field(self.column_name),
             old_value=self.old_value,
             new_value=self.new_value,
         )
+
+
+# The sheet's own column header -> the canonical Item field flags.py reasons about.
+# Independent of `sheet_config.columns` because the change log's "Column Name" is
+# free text written by the sheet's own edit trigger, not a header lookup.
+_CANONICAL_FIELD_MAP = {
+    "SUBCONTRACTOR": "group",
+    "ITEM": "title",
+    "DATE": "due_date",
+    "STATUS": "status",
+    "DETAILS": "ball",
+    "NOTES": "notes",
+}
+
+
+def canonical_field(column_name: str) -> str:
+    """Map a change log's raw "Column Name" to a canonical Item field name.
+
+    Falls back to the header text lowercased for anything not in the map
+    (e.g. a future column), so callers never see an empty field.
+    """
+    mapped = _CANONICAL_FIELD_MAP.get(column_name.strip().upper())
+    if mapped:
+        return mapped
+    return column_name.strip().lower()
 
 
 def normalize_key(sub: str, item: str) -> tuple[str, str]:

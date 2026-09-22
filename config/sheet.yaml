@@ -26,5 +26,6 @@ ai_columns:                          # appended right of NOTES on the latest wee
 agent_tabs: ["AI Brief", "Ask", "AI Log"]   # fully agent-owned
 
 done_status: [Completed, Cancelled]
+done_details: ["Done!", Cancelled]
 ball_in_our_court: [Need to Respond, Needs Clarification, Seeking Approval]
 waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed Up"]

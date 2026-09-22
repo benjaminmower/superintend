@@ -22,9 +22,19 @@ flags/brief/report/RAG. See `docs/adapters.md`.
 
 ```bash
 uv sync
-uv run tracker inspect        # tabs, latest week, header row, column mapping (read-only)
+uv run tracker inspect                 # tabs, latest week, header row, column mapping (read-only)
+uv run tracker flag --dry-run          # AI Flag + AI Next Action on the latest weekly tab
 uv run pytest
 ```
+
+`flag` writes two things per item: a deterministic risk flag (overdue,
+blocked, waiting on us/them too long, stale, missing a date, or
+inconsistent) and one short next action from Claude. A next action is
+only regenerated when the item's status, ball, due date, or notes
+actually changed since the last run — an unchanged item reuses its
+stored text instead of asking the LLM again and getting different
+wording for the same situation. `--no-llm` runs the rules only, with no
+API key needed.
 
 Google Cloud / service account setup: see `docs/setup.md`.
 

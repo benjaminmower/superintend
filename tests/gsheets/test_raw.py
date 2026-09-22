@@ -10,6 +10,7 @@ from tracker_agent.sources.gsheets.raw import (
     latest_weekly_tab,
     write_agent_tab,
     write_ai_cells,
+    write_ai_cells_and_log,
 )
 
 
@@ -108,3 +109,58 @@ def test_write_agent_tab_rejects_non_agent_tab():
 
     with pytest.raises(NotAgentTabError):
         write_agent_tab(client, "Wk of 7/28", sheet_config, updates, dry_run=False)
+
+
+def test_write_ai_cells_and_log_writes_both_tabs_in_one_call():
+    client = make_demo_client()
+    sheet_config = make_sheet_config()
+    ai_updates = [CellUpdate(row=4, header="AI Flag", value="🔴 Overdue")]
+    log_updates = [CellUpdate(row=2, header="Run", value="2025-08-01T00:00:00")]
+
+    write_ai_cells_and_log(
+        client, "Wk of 7/28", "AI Log", sheet_config, ai_updates, log_updates, dry_run=False
+    )
+
+    ai_row = client.read_rows("Wk of 7/28", header_row=3)[0]
+    assert ai_row["AI Flag"] == "🔴 Overdue"
+    log_row = client.read_rows("AI Log", header_row=1)[0]
+    assert log_row["Run"] == "2025-08-01T00:00:00"
+
+
+def test_write_ai_cells_and_log_dry_run_writes_nothing():
+    client = make_demo_client()
+    sheet_config = make_sheet_config()
+    ai_updates = [CellUpdate(row=4, header="AI Flag", value="🔴 Overdue")]
+    log_updates = [CellUpdate(row=2, header="Run", value="2025-08-01T00:00:00")]
+
+    write_ai_cells_and_log(
+        client, "Wk of 7/28", "AI Log", sheet_config, ai_updates, log_updates, dry_run=True
+    )
+
+    ai_row = client.read_rows("Wk of 7/28", header_row=3)[0]
+    assert ai_row.get("AI Flag", "") == ""
+
+
+def test_write_ai_cells_and_log_rejects_human_column():
+    client = make_demo_client()
+    sheet_config = make_sheet_config()
+    ai_updates = [CellUpdate(row=4, header="STATUS", value="Completed")]
+
+    with pytest.raises(AiColumnWriteError):
+        write_ai_cells_and_log(
+            client, "Wk of 7/28", "AI Log", sheet_config, ai_updates, [], dry_run=False
+        )
+
+
+def test_write_ai_cells_and_log_allows_empty_log_tab_not_configured():
+    client = make_demo_client()
+    sheet_config = make_sheet_config()
+    sheet_config.agent_tabs = ["AI Brief", "Ask"]  # no "AI Log"
+    ai_updates = [CellUpdate(row=4, header="AI Flag", value="🔴 Overdue")]
+
+    write_ai_cells_and_log(
+        client, "Wk of 7/28", "AI Log", sheet_config, ai_updates, [], dry_run=False
+    )
+
+    ai_row = client.read_rows("Wk of 7/28", header_row=3)[0]
+    assert ai_row["AI Flag"] == "🔴 Overdue"

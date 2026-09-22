@@ -86,8 +86,11 @@ def _classify_status(status_text: str, location: str, warnings: list[ParseWarnin
 
 
 def _classify_ball(status: Status, details: str, sheet_config: SheetConfig) -> Ball:
-    """A done/cancelled item has no ball to hold; DETAILS decides who has it while open."""
-    if status in (Status.DONE, Status.CANCELLED):
+    """DETAILS decides who has the ball. Kept independent of STATUS (rather than
+    forcing NONE whenever STATUS is done) so flags.py can catch the two disagreeing
+    — e.g. Completed but DETAILS isn't a done_details value.
+    """
+    if details in sheet_config.done_details:
         return Ball.NONE
     if details in sheet_config.ball_in_our_court:
         return Ball.US

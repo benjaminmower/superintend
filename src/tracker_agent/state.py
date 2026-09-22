@@ -42,6 +42,19 @@ CREATE TABLE IF NOT EXISTS parsed_items (
     PRIMARY KEY (project_id, tab, sub, item)
 );
 
+-- One row per (project, item) from the last flag run: a fingerprint of
+-- what the next_action was written from, plus the text itself, so a rerun
+-- with nothing changed reuses the same wording instead of re-asking the
+-- LLM and getting different phrasing for an identical situation.
+CREATE TABLE IF NOT EXISTS flag_state (
+    project_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    next_action TEXT NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (project_id, item_id)
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
     project_id,
     source,        -- doc name, or "tracker"
@@ -78,5 +91,36 @@ def log_run(
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (command, model, input_tokens, output_tokens, latency_ms, status, detail, time.time()),
+    )
+    conn.commit()
+
+
+def get_flag_states(conn: sqlite3.Connection, project_id: str) -> dict[str, tuple[str, str]]:
+    """item_id -> (fingerprint, next_action) as of the last flag run."""
+    rows = conn.execute(
+        "SELECT item_id, fingerprint, next_action FROM flag_state WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
+    return {item_id: (fingerprint, next_action) for item_id, fingerprint, next_action in rows}
+
+
+def set_flag_states(
+    conn: sqlite3.Connection, project_id: str, states: dict[str, tuple[str, str]]
+) -> None:
+    """Overwrite the stored fingerprint/next_action for exactly these items."""
+    now = time.time()
+    conn.executemany(
+        """
+        INSERT INTO flag_state (project_id, item_id, fingerprint, next_action, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (project_id, item_id) DO UPDATE SET
+            fingerprint = excluded.fingerprint,
+            next_action = excluded.next_action,
+            updated_at = excluded.updated_at
+        """,
+        [
+            (project_id, item_id, fingerprint, next_action, now)
+            for item_id, (fingerprint, next_action) in states.items()
+        ],
     )
     conn.commit()

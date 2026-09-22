@@ -93,6 +93,31 @@ def test_ball_classification_from_details():
     assert inspection.ball == Ball.NONE  # done items have no ball to hold
 
 
+def test_ball_stays_independent_of_status_for_inconsistency_detection():
+    """DETAILS drives ball, not STATUS, so a Completed row whose DETAILS isn't
+    a done_details value keeps a real ball — flags.py's inconsistent rule
+    needs to see that disagreement, not have it silently erased here.
+    """
+    from tracker_agent.sources.gsheets.raw import FakeSheetClient
+
+    client = FakeSheetClient()
+    header = ["SUBCONTRACTOR", "ITEM", "", "STATUS", "DETAILS", "NOTES"]
+    client.add_tab(
+        "wk 7/14",
+        [
+            header,
+            ["Framer", "Rough framing", "7/20/2025", "Completed", "Need to Respond", ""],
+        ],
+    )
+    sheet_config = make_sheet_config()
+
+    result = parse_weekly_tab(client, "wk 7/14", "demo-1", sheet_config)
+
+    framing = result.items[0]
+    assert framing.status == Status.DONE
+    assert framing.ball == Ball.US  # not forced to NONE just because STATUS is done
+
+
 def test_item_id_is_stable_across_calls():
     client = make_demo_client()
     sheet_config = make_sheet_config()

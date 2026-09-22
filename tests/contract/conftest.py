@@ -57,7 +57,7 @@ def _build_fake_source() -> TrackerSource:
                 item_id=framing_id,
                 timestamp=dt.datetime(2025, 7, 15, 9, 0, 0),
                 user="bronco@example.com",
-                field="STATUS",
+                field="status",
                 old_value="Not started",
                 new_value="In progress",
             )

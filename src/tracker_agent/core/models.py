@@ -69,6 +69,8 @@ class Change:
     item_id: str
     timestamp: dt.datetime | None
     user: str
+    # Canonical Item field name where the adapter can map it: "title", "group",
+    # "due_date", "status", "ball", "notes". Otherwise the source's own name, lowercased.
     field: str
     old_value: str
     new_value: str
@@ -119,12 +121,21 @@ class Answer:
     confidence: str = "not_found"  # high | medium | low | not_found
 
 
+@dataclass(frozen=True)
+class FieldDiff:
+    item_id: str
+    field: str
+    old: str
+    new: str
+
+
 @dataclass
 class WriteResult:
     ok: bool
     written: int
     dry_run: bool
     detail: str = ""
+    diff: list[FieldDiff] = field(default_factory=list)  # only cells whose value changes
 
 
 @dataclass

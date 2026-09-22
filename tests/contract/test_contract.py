@@ -48,7 +48,7 @@ def test_history_returns_changes_when_capable(source):
     if Capability.READ_HISTORY not in source.capabilities:
         return
     changes = source.history(PROJECT)
-    assert any(c.field == "STATUS" for c in changes)
+    assert any(c.field == "status" for c in changes)
 
 
 def test_history_references_known_item_ids(source):
@@ -69,6 +69,40 @@ def test_write_annotations_dry_run_returns_without_error(source):
 
     assert result.ok
     assert result.dry_run
+
+
+def test_write_annotations_diff_reflects_old_and_new_values(source):
+    if Capability.WRITE_ANNOTATIONS not in source.capabilities:
+        return
+    framing = next(i for i in source.items(PROJECT).items if i.title == "Rough framing")
+
+    first = source.write_annotations(
+        PROJECT, [Annotation(item_id=framing.id, field="flag", value="🔴 Overdue")], dry_run=False
+    )
+    assert [d.old for d in first.diff] == [""]
+    assert [d.new for d in first.diff] == ["🔴 Overdue"]
+
+    second = source.write_annotations(
+        PROJECT, [Annotation(item_id=framing.id, field="flag", value="🟡 Stale")], dry_run=True
+    )
+    assert [d.old for d in second.diff] == ["🔴 Overdue"]
+    assert [d.new for d in second.diff] == ["🟡 Stale"]
+
+
+def test_write_annotations_is_a_noop_for_unchanged_values(source):
+    if Capability.WRITE_ANNOTATIONS not in source.capabilities:
+        return
+    framing = next(i for i in source.items(PROJECT).items if i.title == "Rough framing")
+
+    source.write_annotations(
+        PROJECT, [Annotation(item_id=framing.id, field="flag", value="🔴 Overdue")], dry_run=False
+    )
+    result = source.write_annotations(
+        PROJECT, [Annotation(item_id=framing.id, field="flag", value="🔴 Overdue")], dry_run=False
+    )
+
+    assert result.written == 0
+    assert result.diff == []
 
 
 def test_write_annotations_rejects_unknown_field(source):

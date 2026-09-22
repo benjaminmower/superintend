@@ -60,6 +60,13 @@ class SheetClient(Protocol):
         """Low-level batch write. Call only from write_ai_cells()/write_agent_tab()."""
         ...
 
+    def batch_write_many(self, updates_by_tab: dict[str, list[CellUpdate]]) -> None:
+        """Same as batch_write(), but across multiple tabs in one Sheets API call
+        (guardrail 5: one batch update per run). Call only from write_ai_cells()/
+        write_agent_tab().
+        """
+        ...
+
 
 def classify_tab(name: str, sheet_config: SheetConfig) -> TabRole:
     """Classify a tab by name: "weekly", "changelog", "ignored", or "other"."""
@@ -138,6 +145,21 @@ def latest_weekly_tab(client: SheetClient, sheet_config: SheetConfig, start_year
     return max(resolved, key=lambda pair: pair[1])[0]
 
 
+def _validate_ai_cells(tab: str, sheet_config: SheetConfig, updates: list[CellUpdate]) -> None:
+    allowed = sheet_config.ai_column_headers()
+    for update in updates:
+        if update.header not in allowed:
+            raise AiColumnWriteError(
+                f"Refusing to write to {tab!r}.{update.header!r}: "
+                f"not listed under ai_columns in sheet.yaml"
+            )
+
+
+def _validate_agent_tab(tab: str, sheet_config: SheetConfig) -> None:
+    if tab not in sheet_config.agent_tabs:
+        raise NotAgentTabError(f"{tab!r} is not listed under agent_tabs in sheet.yaml")
+
+
 def write_ai_cells(
     client: SheetClient,
     tab: str,
@@ -152,13 +174,7 @@ def write_ai_cells(
     sheet.yaml. Batches into a single write per call. In dry-run mode,
     validates and returns the would-be updates without writing.
     """
-    allowed = sheet_config.ai_column_headers()
-    for update in updates:
-        if update.header not in allowed:
-            raise AiColumnWriteError(
-                f"Refusing to write to {tab!r}.{update.header!r}: "
-                f"not listed under ai_columns in sheet.yaml"
-            )
+    _validate_ai_cells(tab, sheet_config, updates)
 
     if not dry_run and updates:
         client.batch_write(tab, updates)
@@ -180,13 +196,44 @@ def write_agent_tab(
     AI Log). Every cell on such a tab is writable — there's no
     per-header allow-list, unlike write_ai_cells().
     """
-    if tab not in sheet_config.agent_tabs:
-        raise NotAgentTabError(f"{tab!r} is not listed under agent_tabs in sheet.yaml")
+    _validate_agent_tab(tab, sheet_config)
 
     if not dry_run and updates:
         client.batch_write(tab, updates)
 
     return updates
+
+
+def write_ai_cells_and_log(
+    client: SheetClient,
+    weekly_tab: str,
+    log_tab: str,
+    sheet_config: SheetConfig,
+    ai_updates: list[CellUpdate],
+    log_updates: list[CellUpdate],
+    *,
+    dry_run: bool,
+) -> None:
+    """Write AI columns on a weekly tab and append to the agent-owned log tab
+    in a single Sheets API call (guardrail 5: one batch update per run).
+
+    Both tab's updates are validated the same way write_ai_cells()/
+    write_agent_tab() would; a rejection from either leaves both unwritten.
+    """
+    _validate_ai_cells(weekly_tab, sheet_config, ai_updates)
+    if log_updates:
+        _validate_agent_tab(log_tab, sheet_config)
+
+    if dry_run:
+        return
+
+    updates_by_tab = {}
+    if ai_updates:
+        updates_by_tab[weekly_tab] = ai_updates
+    if log_updates:
+        updates_by_tab[log_tab] = log_updates
+    if updates_by_tab:
+        client.batch_write_many(updates_by_tab)
 
 
 @dataclass
@@ -232,3 +279,7 @@ class FakeSheetClient:
             while len(row) <= col_idx:
                 row.append("")
             row[col_idx] = update.value
+
+    def batch_write_many(self, updates_by_tab: dict[str, list[CellUpdate]]) -> None:
+        for tab, updates in updates_by_tab.items():
+            self.batch_write(tab, updates)

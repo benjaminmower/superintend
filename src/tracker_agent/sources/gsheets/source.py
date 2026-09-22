@@ -16,6 +16,7 @@ from tracker_agent.core.models import (
     Answer,
     Brief,
     Change,
+    FieldDiff,
     ParseResult,
     Question,
     SourceHealth,
@@ -28,10 +29,13 @@ from tracker_agent.sources.gsheets.raw import (
     CellUpdate,
     NoWeeklyTabFoundError,
     SheetClient,
+    find_header_row,
     is_changelog_tab,
     latest_weekly_tab,
-    write_ai_cells,
+    write_ai_cells_and_log,
 )
+
+AI_LOG_TAB = "AI Log"
 
 
 class GSheetsSource(TrackerSource):
@@ -94,7 +98,13 @@ class GSheetsSource(TrackerSource):
         result = parse_weekly_tab(self._client, latest, project, self._sheet_config)
         row_by_item_id = {item.id: item.raw["row"] for item in result.items}
 
+        header_row = find_header_row(self._client, latest, self._sheet_config)
+        current_rows = self._client.read_rows(latest, header_row=header_row)
+        # read_rows() is 0-indexed from just below the header row; map sheet row -> values.
+        current_by_row = {header_row + 1 + i: row for i, row in enumerate(current_rows)}
+
         cell_updates = []
+        diff = []
         for annotation in annotations:
             row = row_by_item_id.get(annotation.item_id)
             if row is None:
@@ -102,10 +112,40 @@ class GSheetsSource(TrackerSource):
             header = self._sheet_config.ai_columns.get(annotation.field)
             if header is None:
                 raise ValueError(f"{annotation.field!r} is not an agent-owned item field")
-            cell_updates.append(CellUpdate(row=row, header=header, value=annotation.value))
 
-        write_ai_cells(self._client, latest, self._sheet_config, cell_updates, dry_run=dry_run)
-        return WriteResult(ok=True, written=len(cell_updates), dry_run=dry_run)
+            old_value = current_by_row.get(row, {}).get(header, "")
+            if old_value == annotation.value:
+                continue  # no-op: don't touch cells that already hold this value
+            cell_updates.append(CellUpdate(row=row, header=header, value=annotation.value))
+            diff.append(
+                FieldDiff(
+                    item_id=annotation.item_id,
+                    field=annotation.field,
+                    old=old_value,
+                    new=annotation.value,
+                )
+            )
+
+        log_updates = []
+        if AI_LOG_TAB in self._sheet_config.agent_tabs and cell_updates:
+            next_row = len(self._client.all_values(AI_LOG_TAB)) + 1
+            timestamp = dt.datetime.now().isoformat(timespec="seconds")
+            log_updates = [
+                CellUpdate(row=next_row, header="Run", value=timestamp),
+                CellUpdate(row=next_row, header="Command", value="flag"),
+                CellUpdate(row=next_row, header="Status", value=f"wrote {len(cell_updates)} cells"),
+            ]
+
+        write_ai_cells_and_log(
+            self._client,
+            latest,
+            AI_LOG_TAB,
+            self._sheet_config,
+            cell_updates,
+            log_updates,
+            dry_run=dry_run,
+        )
+        return WriteResult(ok=True, written=len(cell_updates), dry_run=dry_run, diff=diff)
 
     def write_brief(self, brief: Brief, *, dry_run: bool) -> WriteResult:
         # Not yet in `capabilities` (Phase 2), so `requires` raises

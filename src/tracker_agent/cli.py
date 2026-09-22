@@ -6,9 +6,12 @@ import datetime as dt
 
 import typer
 
-from tracker_agent.config import load_sheet_config
+from tracker_agent import flags as flags_module
+from tracker_agent.config import load_settings, load_sheet_config
+from tracker_agent.sources.base import TrackerSource
 from tracker_agent.sources.gsheets.client import GspreadClient
 from tracker_agent.sources.gsheets.raw import (
+    AiColumnWriteError,
     NoWeeklyTabFoundError,
     classify_tab,
     is_changelog_tab,
@@ -19,11 +22,11 @@ from tracker_agent.sources.gsheets.source import GSheetsSource
 app = typer.Typer(no_args_is_help=True)
 
 
-@app.command()
-def inspect(
-    project: str = typer.Option(None, help="project_id from sheet.yaml; defaults to the first."),
-) -> None:
-    """List tabs, classify each, and report the latest weekly tab. Read-only."""
+def _resolve_source(project: str | None) -> tuple[TrackerSource, str, GspreadClient]:
+    """The only place that resolves the active adapter (guardrail 0: feature
+    code never imports a source directly). Also returns the raw gspread
+    client since `inspect` needs tab-level access `TrackerSource` doesn't expose.
+    """
     sheet_config = load_sheet_config()
 
     spreadsheet = sheet_config.spreadsheets[0]
@@ -40,8 +43,19 @@ def inspect(
         raise typer.Exit(1)
 
     client = GspreadClient(sheet_id)
+    source = GSheetsSource(client, sheet_config)
+    return source, spreadsheet.project_id, client
 
-    typer.echo(f"# {spreadsheet.project_id} ({sheet_id})\n")
+
+@app.command()
+def inspect(
+    project: str = typer.Option(None, help="project_id from sheet.yaml; defaults to the first."),
+) -> None:
+    """List tabs, classify each, and report the latest weekly tab. Read-only."""
+    source, project_id, client = _resolve_source(project)
+    sheet_config = load_sheet_config()
+
+    typer.echo(f"# {project_id}\n")
 
     for tab in client.tab_names():
         role = classify_tab(tab, sheet_config)
@@ -56,14 +70,13 @@ def inspect(
         typer.echo("\nNo weekly tab found.", err=True)
         raise typer.Exit(1) from exc
 
-    source = GSheetsSource(client, sheet_config)
-    result = source.items(spreadsheet.project_id)
+    result = source.items(project_id)
     groups = {item.group for item in result.items}
     typer.echo(f"Header row: found; {len(result.items)} items across {len(groups)} subcontractors")
     for warning in result.warnings:
         typer.echo(f"  warning: {warning.location}: {warning.message}", err=True)
 
-    changes = source.history(spreadsheet.project_id)
+    changes = source.history(project_id)
     changelog_names = [t for t in client.tab_names() if is_changelog_tab(client, t, sheet_config)]
     if changelog_names:
         typer.echo(f"Change log: {len(changes)} rows in {changelog_names[0]!r}")
@@ -72,10 +85,49 @@ def inspect(
 
 
 @app.command()
-def flag(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
+def flag(
+    project: str = typer.Option(None, help="project_id from sheet.yaml; defaults to the first."),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Run the rules only; skip next actions."),
+    as_of: str = typer.Option(
+        None, "--as-of", help="Evaluate as of this date (YYYY-MM-DD) instead of today."
+    ),
+) -> None:
     """Phase 1: AI Flag + AI Next Action on the latest weekly tab."""
-    typer.echo("Not implemented yet: Phase 1 (see SPEC.md).", err=True)
-    raise typer.Exit(1)
+    source, project_id, _client = _resolve_source(project)
+    settings = load_settings()
+    today = dt.date.fromisoformat(as_of) if as_of else dt.date.today()
+
+    try:
+        report = flags_module.run_flag(
+            source, project_id, settings, today=today, dry_run=dry_run, use_llm=not no_llm
+        )
+    except AiColumnWriteError as exc:
+        typer.echo(str(exc), err=True)
+        typer.echo(
+            "Add the AI Flag / AI Next Action headers yourself, right of NOTES on the "
+            "latest weekly tab, then re-run.",
+            err=True,
+        )
+        raise typer.Exit(1) from exc
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    for note in report.skipped:
+        typer.echo(f"note: {note}", err=True)
+
+    typer.echo(f"# {project_id} as of {today}\n")
+    for rule in flags_module.RULE_ORDER:
+        if rule in report.counts:
+            emoji, label = flags_module.RULE_TEXT[rule]
+            typer.echo(f"{emoji} {label}: {report.counts[rule]}")
+
+    if report.write_result is not None:
+        verb = "would write" if dry_run else "wrote"
+        typer.echo(f"\n{verb} {report.write_result.written} cells:")
+        for d in report.write_result.diff:
+            typer.echo(f"  {d.item_id} {d.field}: {d.old!r} -> {d.new!r}")
 
 
 @app.command()

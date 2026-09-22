@@ -92,6 +92,7 @@ class SheetConfig(BaseModel):
     ai_columns: dict[str, str]
     agent_tabs: list[str] = []
     done_status: list[str] = []
+    done_details: list[str] = []  # DETAILS values meaning nobody holds the ball
     ball_in_our_court: list[str] = []
     waiting_on_others: list[str] = []
 

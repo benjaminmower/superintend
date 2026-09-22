@@ -46,22 +46,27 @@ class GspreadClient:
         return rows
 
     def batch_write(self, tab: str, updates: list[CellUpdate]) -> None:
-        ws = self._spreadsheet.worksheet(tab)
-        # The header row for a weekly tab isn't necessarily row 1 (there's
-        # a title row above it), so find each update's header by scanning
-        # the first 10 rows rather than assuming row 1.
-        grid = ws.get_values("A1:Z10")
-        col_index: dict[str, int] = {}
-        for row in grid:
-            for i, cell in enumerate(row, start=1):
-                if cell and cell not in col_index:
-                    col_index[cell] = i
+        self.batch_write_many({tab: updates})
 
-        body = [
-            {
-                "range": gspread.utils.rowcol_to_a1(u.row, col_index[u.header]),
-                "values": [[u.value]],
-            }
-            for u in updates
-        ]
-        ws.batch_update(body)
+    def batch_write_many(self, updates_by_tab: dict[str, list[CellUpdate]]) -> None:
+        # One values_batch_update call across every tab (guardrail 5), each
+        # range qualified with its tab name so cells land on the right sheet.
+        body = []
+        for tab, updates in updates_by_tab.items():
+            ws = self._spreadsheet.worksheet(tab)
+            # The header row for a weekly tab isn't necessarily row 1 (there's
+            # a title row above it), so find each update's header by scanning
+            # the first 10 rows rather than assuming row 1.
+            grid = ws.get_values("A1:Z10")
+            col_index: dict[str, int] = {}
+            for row in grid:
+                for i, cell in enumerate(row, start=1):
+                    if cell and cell not in col_index:
+                        col_index[cell] = i
+
+            for u in updates:
+                a1 = gspread.utils.rowcol_to_a1(u.row, col_index[u.header])
+                body.append({"range": f"'{tab}'!{a1}", "values": [[u.value]]})
+
+        if body:
+            self._spreadsheet.values_batch_update({"valueInputOption": "RAW", "data": body})

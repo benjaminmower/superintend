@@ -101,6 +101,7 @@ def make_sheet_config() -> SheetConfig:
         ai_columns={"flag": "AI Flag", "next_action": "AI Next Action"},
         agent_tabs=["AI Brief", "Ask", "AI Log"],
         done_status=["Completed", "Cancelled"],
+        done_details=["Done!", "Cancelled"],
         ball_in_our_court=["Need to Respond", "Needs Clarification", "Seeking Approval"],
         waiting_on_others=["Waiting for Response", "Reached out", "No Answer – Followed Up"],
     )

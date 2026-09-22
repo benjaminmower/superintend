@@ -52,5 +52,5 @@ def test_to_change_produces_canonical_change_with_matching_item_id():
     change = raw_changes[0].to_change("demo-1")
 
     assert change.item_id == item_id("demo-1", "Framer", "Rough framing")
-    assert change.field == "STATUS"
+    assert change.field == "status"
     assert change.new_value == "In progress"
