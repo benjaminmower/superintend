@@ -10,16 +10,21 @@ This doc is binding on how Phase 3 (report), Phase 5 (backtest), and Phase 7 (ag
 
 ## 0. The baseline that expires — do this first
 
-**Time your weekly report, by hand, for the next 3 weeks.** Start a timer when you begin assembling it, stop when you send it. Log it in `metrics/manual-baseline.csv` (gitignored — real project timing/notes, never published raw; only aggregated numbers go in the README):
+**Two different activities, logged separately, because they're replaced by different phases:**
+
+1. **Report prep** — the time spent assembling and writing the weekly report email itself. This is what Phase 3 (`tracker report`) automates.
+2. **Tracker maintenance and sequencing review** — updating the document and checking sequencing day-to-day, independent of the Friday report. On `project-1` this is currently **5–6 hours a week**, on its own — bigger than report prep and mostly *not* what Phase 3 touches. This is closer to what Phase 1's flags/next-actions and Phase 2's brief are meant to cut down: the scanning-for-what-needs-attention work, not the email-writing work.
+
+Conflating the two would make an eventual claim like "cuts weekly report prep from A to B minutes" false — the 5-6 hours is a materially different (and bigger) number, and misattributing it to the wrong phase breaks honesty rule #4 below (separate what's being claimed).
+
+**Time both, separately, for the next 3 weeks.** Start a timer for each activity, stop when it's done. Log it in `metrics/manual-baseline.csv` (gitignored — real project timing/notes, never published raw; only aggregated numbers go in the README):
 
 ```csv
-date,minutes,items_reviewed,notes
-2026-09-25,47,280,"chased 3 subs for status first"
+date,report_prep_minutes,tracker_maintenance_minutes,items_reviewed,notes
+2026-09-25,47,330,280,"chased 3 subs for status first; sequencing review took ~1hr of the maintenance time"
 ```
 
-Everything else in this doc can be reconstructed from the Changelog later. **This can't.** The moment Phase 3 ships, the before-state is gone forever.
-
-Same idea, cheaper: note roughly how long you spend each week scanning the tracker for what needs attention, separate from writing the report.
+Everything else in this doc can be reconstructed from the Changelog later. **This can't.** The moment Phase 1-3 are fully trusted and change how you work, the before-state is gone forever.
 
 ---
 
@@ -121,6 +126,7 @@ The part everyone hand-waves. Keep it small and real.
 | What | How | When |
 |---|---|---|
 | **Report prep time** | the manual baseline above vs. timed prep after Phase 3 | before + after |
+| **Tracker maintenance/sequencing time** | the manual baseline above vs. timed maintenance once Phase 1/2 flags and brief are trusted enough to lean on | before + after |
 | **Action rate** | add a temporary column: did this flag cause anyone to do something that week? | 1 month |
 | **Catch log** | `metrics/catches.md` — items surfaced that you'd have missed, one paragraph each | ongoing |
 | **The turn-off question** | ask your boss after a month: "if I switched this off, would you notice?" | month 1 |
@@ -133,7 +139,7 @@ The part everyone hand-waves. Keep it small and real.
 
 The README headline, once the numbers exist:
 
-> Flags at-risk items with **X% precision** and a **Y-day median lead time**, backtested across 5 months and 3,079 change events on a live LA new-construction project. Cuts weekly report prep from **A to B minutes**. Runs for about **$Z/month**.
+> Flags at-risk items with **X% precision** and a **Y-day median lead time**, backtested across 5 months and 3,079 change events on a live LA new-construction project. Cuts weekly tracker maintenance and sequencing review from **5-6 hours to C**, and report prep from **A to B minutes**. Runs for about **$Z/month**.
 
 Specific, falsifiable, and it says what it costs.
 
@@ -151,8 +157,9 @@ Specific, falsifiable, and it says what it costs.
 
 | When | Do |
 |---|---|
-| **This week** | Start the manual report-time baseline (3 weeks) |
+| **This week** | Start the manual baseline: report prep AND tracker maintenance/sequencing time, separately (3 weeks) |
 | **Now → ongoing** | Catch log, whenever something surfaces |
+| **Phase 1/2 trusted** | Time tracker maintenance/sequencing once flags and the brief are relied on, for 3 weeks |
 | **Phase 3 ships** | Time the assisted report prep for 3 weeks |
 | **Phase 5** | Freeze `did_slip()`, run the backtest, holdout validation, publish tables |
 | **Phase 7** | Same replay with the agent; fill the comparison table |
