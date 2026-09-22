@@ -1,0 +1,19 @@
+# Model ID lives here and nowhere else in the codebase.
+model: "claude-sonnet-5"
+
+sheet:
+  id: "${SHEET_ID}"
+  id_demo: "${SHEET_ID_DEMO}"
+
+flags:
+  stale_after_days: 7
+
+digest:
+  recipients: []
+  send_day: "monday"
+  send_hour: 7
+
+rag:
+  chunk_size_tokens: 500
+  chunk_overlap_tokens: 50
+  top_k: 6

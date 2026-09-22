@@ -1,0 +1,24 @@
+# Column mapping, generated as a starting point by `tracker inspect`,
+# then hand-edited. Map by header TEXT, never by letter or index — the
+# boss may reorder columns.
+
+tab: Projects
+key_column: "Project"          # unique row id
+
+columns:                        # semantic name -> header text in the sheet
+  project: "Project"
+  address: "Address"
+  phase: "Phase"
+  status: "Status"
+  next_milestone: "Next Milestone"
+  milestone_date: "Target Date"
+  notes: "Notes"
+  permit_status: "Permit"
+  inspection_next: "Next Inspection"
+
+ai_columns:                     # the ONLY columns the agent may write; created if missing
+  summary: "AI Summary"
+  next_action: "AI Next Action"
+  flag: "AI Flag"
+  flag_reason: "AI Flag Reason"
+  updated: "AI Updated"
