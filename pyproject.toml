@@ -2,6 +2,7 @@
 name = "tracker-agent"
 version = "0.1.0"
 description = "AI layer on top of a Google Sheets construction project tracker"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "gspread>=6.1",
