@@ -4,7 +4,7 @@
 
 Add an AI layer to the existing Google Sheets weekly construction tracker **without changing how the team works**. The boss keeps reading the same sheet. The agent:
 
-1. Flags at-risk items and writes a next action on each row
+1. Flags at-risk items and writes a next action on each row — first by deterministic rules (Phase 1), later with an agent that investigates each candidate before deciding (Phase 7)
 2. Writes a project brief (overall and per subcontractor) to its own tab
 3. Drafts the weekly report and emails it
 4. Answers questions from project documents **and the tracker's own history**, with citations, through an "Ask" tab
@@ -237,6 +237,90 @@ Do this once Phases 1–3 are working, not at the end. It's the phase that turns
 4. `tracker sources` lists the registered adapters with their capabilities; `--source csv` overrides the active one per run.
 
 **Done when:** the same commands produce a correct brief and report from two different sources, and the contract suite passes for both.
+
+## Phase 7: The investigating flagger (the agentic layer)
+
+The phase that makes the word "agent" true. **Do it after the Phase 5 backtest exists**, because the backtest is the only thing that proves it was worth doing.
+
+### Why an agent here and nowhere else
+
+Phases 1–3 are deterministic on purpose: auditable, cheap, backtestable. But a rule sees one item at a time, and the real question is one a rule can't express: *is this item actually stuck, or is it fine?*
+
+Concretely, from the production sheet:
+
+- A stale item may be waiting on a related item that is itself progressing — sequenced, not stuck. (The "Retaining wall — waiting until after the garage slab is poured" shape.)
+- An overdue item may already be done, with the note recorded on a different sub's row.
+- "Waiting for Response" from a sub who answers everything else in 2 days means something different than from one who has gone quiet across all their items.
+- On a 51-subcontractor sheet, whether an item matters depends on what it blocks — which no per-item rule can see.
+
+Each requires looking somewhere else before deciding. That is a control-flow decision, which is the definition of an agent.
+
+### Design: rules propose, the agent disposes
+
+The deterministic rules stay as the **candidate generator** — free, exhaustive, never miss. The agent investigates only what the rules flagged. On the production sheet that was **33 flagged items out of 280**, so the agent runs on ~12% of rows. That caps cost and blast radius.
+
+```
+280 items ──rules──> ~33 candidates ──agent loop──> verdict each
+                          │                             │
+                   (247: no flag)          confirm / downgrade / drop / escalate
+                                           + reason + evidence + confidence
+```
+
+**Tools (read-only, local, no LLM-chosen writes):**
+
+| Tool | Returns |
+|---|---|
+| `get_item_history(item_id)` | every Changelog entry for this item, oldest first |
+| `find_related_items(item_id)` | same sub, or overlapping keywords in title/notes ("footing", "slab", "sewer") |
+| `get_sub_responsiveness(sub)` | median days to respond, open items, last activity — from the Changelog |
+| `search_notes(query)` | FTS over all notes across all weekly tabs (reuses the Phase 4 index) |
+| `get_schedule_context(item_id)` | items with nearby dates: what this blocks, what blocks it |
+| `search_docs(query)` | the Phase 4 document index ("the spec says submittals take 14 days") |
+
+**Loop:** the agent receives the item, its triggered rules, and the tool list; calls tools until it can decide, capped at `max_tool_calls` (default 6); returns:
+
+```python
+class Verdict(BaseModel):
+    decision: Literal["confirm", "downgrade", "drop", "escalate"]
+    severity: Literal["red", "orange", "yellow", "none"]
+    reason: str           # ≤100 chars → AI Next Action
+    evidence: list[str]   # item ids / weeks / doc refs the tools actually returned
+    confidence: Literal["high", "medium", "low"]
+```
+
+**`escalate` is what justifies the phase.** A rule fires only on what it was told to look for; the agent can surface a risk nobody wrote a rule for.
+
+### Guardrails
+
+1. **Read-only tools.** The agent returns a verdict; deterministic code writes the cells. The Phase 0 allow-list is untouched.
+2. **Evidence is validated.** Every id/week/doc ref must match something a tool returned *this run*. Unverifiable → discard the verdict, keep the rule's original flag. Same discipline as Phase 4 citation validation.
+3. **Rules are the floor for `drop`.** Dropping a 🔴 Overdue or Blocked item requires `confidence: high` plus evidence; otherwise it becomes `downgrade`. The agent never silently clears hard risk.
+4. **Skip duplicate-collision rows entirely.** Rows sharing a collided `item_id` already get `⚠️ Duplicate — consolidate with row N`; the agent must not investigate them, because its tools key on `item_id` and would be reasoning over merged history from two different tasks. Assert this in a test.
+5. **The fingerprint cache extends to verdicts.** Add the verdict to `flag_state` and include `(decision, severity)` in the fingerprint. An unchanged item reuses its stored verdict rather than re-running a 6-call investigation every night — otherwise Phase 7 is ~33 investigations/run forever, and the reruns churn cells for no reason.
+6. **Full trace** of every tool call, arguments, and verdict to `run_log` and the AI Log tab. You cannot backtest or debug what you did not record — and the trace is the single best artifact to show in an interview.
+7. **Budget:** `max_tool_calls` per item plus a per-run cost ceiling. On exceeding either, fall back to the rule's flag and log it.
+8. **Kill switch:** `agentic_flags: false` reverts to Phase 1. The pipeline must stay fully functional without the agent.
+9. **Respect `max_tokens`.** Per the Phase 1 bug log: a multi-item batch silently truncated at the 1024 default. Investigation traces are longer than next-action batches — set it explicitly and validate every response.
+
+### The measurement (the portfolio payload)
+
+The Phase 5 backtest already replays Mondays from the Changelog and scores the rules. **Run the agent over the same replay.** The rules give the baseline for free:
+
+| | Rules only | Rules + agent |
+|---|---|---|
+| Precision (flagged → actually slipped) | baseline | ? |
+| Recall (slipped → was flagged) | baseline | ? |
+| False positives / week | baseline | ? |
+| Median lead time (days before the slip) | baseline | ? |
+| Cost / week | ~$0 | $? |
+
+Plus two agent-only numbers: rule false positives correctly dropped, and `escalate` verdicts that were genuinely warranted.
+
+**Report it honestly, including if the agent loses.** "Cut false positives 40% at $0.60/week" is a great result. So is "no measurable gain over the rules, so it ships off by default" — that reads as a more credible engineer than one whose AI always wins. Either way you have what almost no portfolio project has: **a measured comparison of an agentic approach against a deterministic baseline, on real project data.**
+
+### Done when
+
+`tracker flag --agentic` runs on the demo and the real sheet; every verdict carries validated evidence; the comparison table above is filled with real numbers; and the README shows one complete trace — item, rules fired, tool calls, verdict — as a worked example.
 
 ## Stretch
 
