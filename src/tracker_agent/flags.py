@@ -378,6 +378,10 @@ def run_flag(
                     output_schema=output_schema,
                     command=command,
                     conn=conn,
+                    # A batch of up to 20 items' worth of JSON next actions
+                    # doesn't fit in call_llm's 1024-token default — that
+                    # truncates the response mid-JSON and fails validation.
+                    max_tokens=4096,
                 )
 
         next_actions = write_next_actions(flagged, changes, llm_call, previous=previous)
@@ -390,14 +394,27 @@ def run_flag(
 
     # Clear-and-rewrite: every item gets an annotation (blank if unflagged/done),
     # so text carried over on a duplicated tab never survives a run.
+    #
+    # A duplicate (SUBCONTRACTOR, ITEM) pair on one tab collides onto the same
+    # item_id (see parse_weekly._warn_duplicate_items — a warning surfaces
+    # this), so `flagged` can contain the same item.id twice here. Dedupe by
+    # (item_id, field): the value is identical either way (same underlying
+    # item), and GSheetsSource.write_annotations() already fans a single
+    # annotation out to every row sharing that id.
+    seen: set[tuple[str, str]] = set()
     annotations = []
     for f in flagged:
-        annotations.append(Annotation(item_id=f.item.id, field="flag", value=f.cell_text))
-        annotations.append(
+        for annotation in (
+            Annotation(item_id=f.item.id, field="flag", value=f.cell_text),
             Annotation(
                 item_id=f.item.id, field="next_action", value=next_actions.get(f.item.id, "")
-            )
-        )
+            ),
+        ):
+            key = (annotation.item_id, annotation.field)
+            if key in seen:
+                continue
+            seen.add(key)
+            annotations.append(annotation)
 
     write_result = None
     if Capability.WRITE_ANNOTATIONS not in source.capabilities:

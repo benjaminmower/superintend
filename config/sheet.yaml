@@ -6,8 +6,12 @@
 spreadsheets:
   - project_id: demo-1              # slug; keep real project names out of the public repo
     sheet_id_env: SHEET_ID_DEMO     # real ID lives in .env
+  - project_id: project-1           # real project; keep the name generic in the public repo
+    sheet_id_env: SHEET_ID          # real ID lives in .env
+    changelog_tab: "Changelog"      # this sheet's tab is "Changelog", not "Change log"
 
-changelog_tab: auto                 # detect by header "Timestamp, User, Sheet Name"
+changelog_tab: auto                 # default for spreadsheets with no override above; detect
+                                     # by header "Timestamp, User, Sheet Name"
 weekly_tab_regex: '^\s*(wk|week)\s*(of\s*)?(\d{1,2})/(\d{1,2})\s*$'
 ignore_tab_regex: '^copy of'
 
@@ -28,4 +32,4 @@ agent_tabs: ["AI Brief", "Ask", "AI Log"]   # fully agent-owned
 done_status: [Completed, Cancelled]
 done_details: ["Done!", Cancelled]
 ball_in_our_court: [Need to Respond, Needs Clarification, Seeking Approval]
-waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed Up"]
+waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed Up", "Dependent On"]

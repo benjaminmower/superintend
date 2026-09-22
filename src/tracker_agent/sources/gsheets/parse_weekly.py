@@ -75,14 +75,39 @@ def _column_index(headers: list[str], date_header: str, fallback_after: str) -> 
     return index
 
 
-def _classify_status(status_text: str, location: str, warnings: list[ParseWarning]) -> Status:
+# DETAILS values that imply a STATUS, used only when the raw STATUS cell
+# doesn't map on its own (blank, or a DETAILS value typed in by mistake —
+# e.g. "Reached out" belongs in DETAILS, not STATUS).
+_STATUS_FROM_DETAILS = {
+    "cancelled": Status.CANCELLED,
+    "done!": Status.DONE,
+}
+
+
+def _classify_status(
+    status_text: str, details: str, location: str, warnings: list[ParseWarning]
+) -> Status:
     status = _STATUS_MAP.get(status_text.strip().lower())
-    if status is None:
+    if status is not None:
+        return status
+
+    inferred = _STATUS_FROM_DETAILS.get(details.strip().lower())
+    if inferred is not None:
         warnings.append(
-            ParseWarning(location=location, message=f"unrecognized STATUS value {status_text!r}")
+            ParseWarning(
+                location=location,
+                message=(
+                    f"STATUS {status_text!r} not recognized; inferred {inferred.value!r} "
+                    f"from DETAILS {details!r}"
+                ),
+            )
         )
-        return Status.NOT_STARTED
-    return status
+        return inferred
+
+    warnings.append(
+        ParseWarning(location=location, message=f"unrecognized STATUS value {status_text!r}")
+    )
+    return Status.NOT_STARTED
 
 
 def _classify_ball(status: Status, details: str, sheet_config: SheetConfig) -> Ball:
@@ -139,7 +164,7 @@ def parse_weekly_tab(
 
         status_text = _normalize_multiselect(row[status_idx], location, warnings)
         details = _normalize_multiselect(row[details_idx], location, warnings)
-        status = _classify_status(status_text, location, warnings)
+        status = _classify_status(status_text, details, location, warnings)
 
         items.append(
             Item(
@@ -157,4 +182,33 @@ def parse_weekly_tab(
             )
         )
 
+    _warn_duplicate_items(items, tab, warnings)
+
     return ParseResult(items=items, warnings=warnings)
+
+
+def _warn_duplicate_items(items: list[Item], tab: str, warnings: list[ParseWarning]) -> None:
+    """item_id() hashes (group, title) so an item's id stays stable week to
+    week — but that means two genuinely different rows on the SAME tab with
+    the same (group, title) text collide onto one id, and flags.py/writes
+    can't tell them apart. Not fixable here (nothing in the sheet
+    disambiguates them), so surface it loudly instead of silently merging.
+    """
+    seen: dict[str, list[int]] = {}
+    for item in items:
+        seen.setdefault(item.id, []).append(item.raw["row"])
+    for item_id_value, rows in seen.items():
+        if len(rows) > 1:
+            title = next(i.title for i in items if i.id == item_id_value)
+            warnings.append(
+                ParseWarning(
+                    location=f"{tab} rows {rows}",
+                    message=(
+                        f"duplicate item {title!r} on rows {rows}: identical "
+                        f"(SUBCONTRACTOR, ITEM) text makes these rows indistinguishable "
+                        f"to item_id() — GSheetsSource.write_annotations() writes a "
+                        f"\"consolidate\" flag to each row instead of guessing a shared "
+                        f"flag/next_action"
+                    ),
+                )
+            )

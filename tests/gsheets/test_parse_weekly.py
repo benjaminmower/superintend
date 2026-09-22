@@ -67,6 +67,53 @@ def test_multiselect_status_takes_last_value_and_warns():
     assert any("multi-select" in w.message for w in result.warnings)
 
 
+def test_blank_status_infers_cancelled_from_details():
+    """The real tracker has rows where DETAILS was set to Cancelled but
+    STATUS was never updated to match — infer it rather than treating the
+    item as not_started (and log why, so it's visible on a --dry-run).
+    """
+    from tracker_agent.sources.gsheets.raw import FakeSheetClient
+
+    client = FakeSheetClient()
+    header = ["SUBCONTRACTOR", "ITEM", "", "STATUS", "DETAILS", "NOTES"]
+    client.add_tab(
+        "wk 7/14",
+        [header, ["Framer", "stub out for kitchen island", "", "", "Cancelled", "dry run"]],
+    )
+    sheet_config = make_sheet_config()
+
+    result = parse_weekly_tab(client, "wk 7/14", "demo-1", sheet_config)
+
+    item = result.items[0]
+    assert item.status == Status.CANCELLED
+    assert any("inferred" in w.message for w in result.warnings)
+
+
+def test_unrecognized_status_with_unhelpful_details_falls_back_to_not_started():
+    """STATUS="Reached out" is really a DETAILS value typed in the wrong
+    column; DETAILS itself doesn't imply a lifecycle state here, so this
+    should still fall back to not_started (with a warning), not guess.
+    """
+    from tracker_agent.sources.gsheets.raw import FakeSheetClient
+
+    client = FakeSheetClient()
+    header = ["SUBCONTRACTOR", "ITEM", "", "STATUS", "DETAILS", "NOTES"]
+    client.add_tab(
+        "wk 7/14",
+        [header, ["Framer", "Exterior fixtures", "", "Reached out", "Waiting for Response", ""]],
+    )
+    sheet_config = make_sheet_config()
+
+    result = parse_weekly_tab(client, "wk 7/14", "demo-1", sheet_config)
+
+    item = result.items[0]
+    assert item.status == Status.NOT_STARTED
+    assert any(
+        "unrecognized STATUS" in w.message and "inferred" not in w.message
+        for w in result.warnings
+    )
+
+
 def test_notes_and_details_pass_through():
     client = make_demo_client()
     sheet_config = make_sheet_config()
@@ -116,6 +163,41 @@ def test_ball_stays_independent_of_status_for_inconsistency_detection():
     framing = result.items[0]
     assert framing.status == Status.DONE
     assert framing.ball == Ball.US  # not forced to NONE just because STATUS is done
+
+
+def test_duplicate_item_on_same_tab_warns():
+    """Two rows on the same tab sharing (SUBCONTRACTOR, ITEM) text collide
+    onto the same item_id (it's a hash of that pair, meant to stay stable
+    across weeks) — surface that loudly rather than silently merging them.
+    """
+    from tracker_agent.sources.gsheets.raw import FakeSheetClient
+
+    client = FakeSheetClient()
+    header = ["SUBCONTRACTOR", "ITEM", "", "STATUS", "DETAILS", "NOTES"]
+    client.add_tab(
+        "wk 7/14",
+        [
+            header,
+            ["Soil Engineer", "Recompaction", "7/1/2025", "In progress", "On the schedule", ""],
+            ["Soil Engineer", "Recompaction", "7/15/2025", "Not started", "", ""],
+        ],
+    )
+    sheet_config = make_sheet_config()
+
+    result = parse_weekly_tab(client, "wk 7/14", "demo-1", sheet_config)
+
+    assert len(result.items) == 2
+    assert result.items[0].id == result.items[1].id
+    assert any("duplicate item" in w.message for w in result.warnings)
+
+
+def test_distinct_items_on_same_tab_do_not_warn():
+    client = make_demo_client()
+    sheet_config = make_sheet_config()
+
+    result = parse_weekly_tab(client, "wk 7/14", "demo-1", sheet_config)
+
+    assert not any("duplicate item" in w.message for w in result.warnings)
 
 
 def test_item_id_is_stable_across_calls():

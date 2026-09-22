@@ -8,7 +8,7 @@ from pathlib import Path
 import gspread
 from google.oauth2.service_account import Credentials
 
-from tracker_agent.sources.gsheets.raw import CellUpdate
+from tracker_agent.sources.gsheets.raw import CellUpdate, TabNotFoundError
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -25,15 +25,21 @@ class GspreadClient:
         self._gc = gspread.authorize(creds)
         self._spreadsheet = self._gc.open_by_key(sheet_id)
 
+    def _worksheet(self, tab: str) -> gspread.Worksheet:
+        try:
+            return self._spreadsheet.worksheet(tab)
+        except gspread.exceptions.WorksheetNotFound as exc:
+            raise TabNotFoundError(tab) from exc
+
     def tab_names(self) -> list[str]:
         return [ws.title for ws in self._spreadsheet.worksheets()]
 
     def all_values(self, tab: str) -> list[list[str]]:
-        ws = self._spreadsheet.worksheet(tab)
+        ws = self._worksheet(tab)
         return ws.get_all_values()
 
     def headers(self, tab: str, header_row: int = 1) -> list[str]:
-        ws = self._spreadsheet.worksheet(tab)
+        ws = self._worksheet(tab)
         return ws.row_values(header_row)
 
     def read_rows(self, tab: str, header_row: int = 1) -> list[dict[str, str]]:
@@ -53,7 +59,7 @@ class GspreadClient:
         # range qualified with its tab name so cells land on the right sheet.
         body = []
         for tab, updates in updates_by_tab.items():
-            ws = self._spreadsheet.worksheet(tab)
+            ws = self._worksheet(tab)
             # The header row for a weekly tab isn't necessarily row 1 (there's
             # a title row above it), so find each update's header by scanning
             # the first 10 rows rather than assuming row 1.

@@ -31,6 +31,15 @@ class NotAgentTabError(ValueError):
     """Raised when write_agent_tab() is called on a tab not in agent_tabs."""
 
 
+class TabNotFoundError(ValueError):
+    """Raised by a SheetClient when a named tab doesn't exist on the spreadsheet.
+
+    Part of the SheetClient error contract (not gspread-specific) so
+    GSheetsSource never has to import gspread directly, and FakeSheetClient
+    can raise the same thing in tests.
+    """
+
+
 TabRole = str  # "weekly" | "changelog" | "ignored" | "other"
 
 
@@ -68,21 +77,33 @@ class SheetClient(Protocol):
         ...
 
 
-def classify_tab(name: str, sheet_config: SheetConfig) -> TabRole:
-    """Classify a tab by name: "weekly", "changelog", "ignored", or "other"."""
+def classify_tab(name: str, sheet_config: SheetConfig, changelog_tab: str | None = None) -> TabRole:
+    """Classify a tab by name: "weekly", "changelog", "ignored", or "other".
+
+    `changelog_tab` is the resolved value for the spreadsheet in question
+    (SpreadsheetConfig.changelog_tab or sheet_config.changelog_tab as the
+    shared default) — pass it explicitly since one SheetConfig can cover
+    several spreadsheets with different changelog tab names.
+    """
+    changelog_tab = changelog_tab if changelog_tab is not None else sheet_config.changelog_tab
     if re.match(sheet_config.ignore_tab_regex, name, re.IGNORECASE):
         return "ignored"
     if re.match(sheet_config.weekly_tab_regex, name, re.IGNORECASE):
         return "weekly"
-    if sheet_config.changelog_tab != "auto" and name == sheet_config.changelog_tab:
+    if changelog_tab != "auto" and name == changelog_tab:
         return "changelog"
     return "other"
 
 
-def is_changelog_tab(client: SheetClient, name: str, sheet_config: SheetConfig) -> bool:
-    """For changelog_tab: auto, detect by the tab's header row."""
-    if sheet_config.changelog_tab != "auto":
-        return name == sheet_config.changelog_tab
+def is_changelog_tab(
+    client: SheetClient, name: str, sheet_config: SheetConfig, changelog_tab: str | None = None
+) -> bool:
+    """For changelog_tab: auto, detect by the tab's header row. See classify_tab()
+    for what `changelog_tab` should be.
+    """
+    changelog_tab = changelog_tab if changelog_tab is not None else sheet_config.changelog_tab
+    if changelog_tab != "auto":
+        return name == changelog_tab
     try:
         headers = client.headers(name)
     except (KeyError, IndexError):
@@ -250,6 +271,8 @@ class FakeSheetClient:
         return list(self._tabs)
 
     def all_values(self, tab: str) -> list[list[str]]:
+        if tab not in self._tabs:
+            raise TabNotFoundError(tab)
         return [list(row) for row in self._tabs[tab]]
 
     def headers(self, tab: str, header_row: int = 1) -> list[str]:

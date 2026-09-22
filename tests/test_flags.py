@@ -292,6 +292,21 @@ def test_run_flag_clears_and_rewrites_every_item():
     assert source.written_annotation("item-1", "next_action") is None
 
 
+def test_run_flag_deduplicates_annotations_for_a_shared_item_id():
+    """Two Items sharing an id (the gsheets duplicate-row case) must not
+    produce duplicate Annotations — GSheetsSource fans one annotation out
+    to every row with that id; run_flag must not also multiply it.
+    """
+    source = FakeSource()
+    item_a = _item(id="dup-1", status=Status.BLOCKED, due_date=TODAY)
+    item_b = _item(id="dup-1", status=Status.BLOCKED, due_date=TODAY, notes="second row")
+    source.seed_items(PROJECT, [item_a, item_b])
+
+    report = run_flag(source, PROJECT, _settings(), today=TODAY, dry_run=False, use_llm=False)
+
+    assert report.write_result.written == 1  # one flag cell for the shared id, not two
+
+
 def test_run_flag_dry_run_writes_nothing():
     source = _seeded_source()
     report = run_flag(source, PROJECT, _settings(), today=TODAY, dry_run=True, use_llm=False)

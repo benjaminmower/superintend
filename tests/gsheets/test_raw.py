@@ -7,6 +7,7 @@ from tracker_agent.sources.gsheets.raw import (
     NotAgentTabError,
     NoWeeklyTabFoundError,
     classify_tab,
+    is_changelog_tab,
     latest_weekly_tab,
     write_agent_tab,
     write_ai_cells,
@@ -28,6 +29,25 @@ def test_classify_tab_ignores_copy_of_tabs():
 def test_classify_tab_other_for_unrelated_names():
     sheet_config = make_sheet_config()
     assert classify_tab("AI Brief", sheet_config) == "other"
+
+
+def test_classify_tab_uses_per_spreadsheet_changelog_override():
+    """A spreadsheet whose changelog tab isn't named per sheet_config's shared
+    default (e.g. "Changelog" instead of "Change log") still gets classified
+    correctly when SpreadsheetConfig.changelog_tab is passed explicitly.
+    """
+    sheet_config = make_sheet_config()  # shared default: changelog_tab="auto"
+    assert classify_tab("Changelog", sheet_config, changelog_tab="Changelog") == "changelog"
+    assert classify_tab("Changelog", sheet_config) == "other"  # no override -> falls to "auto"
+
+
+def test_is_changelog_tab_uses_per_spreadsheet_changelog_override():
+    client = make_demo_client()
+    sheet_config = make_sheet_config()
+    client.add_tab("Changelog", [["not", "a", "real", "changelog", "header"]])
+
+    assert is_changelog_tab(client, "Changelog", sheet_config, changelog_tab="Changelog")
+    assert not is_changelog_tab(client, "Change log", sheet_config, changelog_tab="Changelog")
 
 
 def test_latest_weekly_tab_picks_most_recent_by_sheet_order():

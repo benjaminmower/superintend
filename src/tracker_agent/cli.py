@@ -54,12 +54,14 @@ def inspect(
     """List tabs, classify each, and report the latest weekly tab. Read-only."""
     source, project_id, client = _resolve_source(project)
     sheet_config = load_sheet_config()
+    spreadsheet = next(s for s in sheet_config.spreadsheets if s.project_id == project_id)
+    changelog_tab_override = spreadsheet.changelog_tab
 
     typer.echo(f"# {project_id}\n")
 
     for tab in client.tab_names():
-        role = classify_tab(tab, sheet_config)
-        if role == "other" and is_changelog_tab(client, tab, sheet_config):
+        role = classify_tab(tab, sheet_config, changelog_tab_override)
+        if role == "other" and is_changelog_tab(client, tab, sheet_config, changelog_tab_override):
             role = "changelog"
         typer.echo(f"{tab!r}: {role}")
 
@@ -77,7 +79,11 @@ def inspect(
         typer.echo(f"  warning: {warning.location}: {warning.message}", err=True)
 
     changes = source.history(project_id)
-    changelog_names = [t for t in client.tab_names() if is_changelog_tab(client, t, sheet_config)]
+    changelog_names = [
+        t
+        for t in client.tab_names()
+        if is_changelog_tab(client, t, sheet_config, changelog_tab_override)
+    ]
     if changelog_names:
         typer.echo(f"Change log: {len(changes)} rows in {changelog_names[0]!r}")
     else:

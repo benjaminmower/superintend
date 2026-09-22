@@ -56,6 +56,7 @@ class Settings(BaseModel):
 class SpreadsheetConfig(BaseModel):
     project_id: str
     sheet_id_env: str
+    changelog_tab: str | None = None  # overrides SheetConfig.changelog_tab for this sheet only
 
     def sheet_id(self) -> str:
         return os.environ.get(self.sheet_id_env, "")
