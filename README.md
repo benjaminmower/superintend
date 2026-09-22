@@ -4,7 +4,7 @@
 
 It reads the weekly Google Sheet a general contractor already keeps — no new tool, no migration, no training — and writes two columns back: a risk flag and one short next action. Later phases add a project brief, the weekly report email, a Q&A tab over project history, and an agent that investigates each flagged item before deciding whether it's really a problem.
 
-Running live on an active Los Angeles new-construction project: **280 items, 51 subcontractors, 39 weekly tabs, ~3,100 recorded edits.**
+Running live on an active Palisades Fire rebuild project: **280 items, 51 subcontractors, 39 weekly tabs, ~3,100 recorded edits.**
 
 ---
 
