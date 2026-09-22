@@ -175,6 +175,8 @@ waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed U
 
 ## Phase 2: AI Brief tab
 
+**Housekeeping, do this first:** rename the package `src/tracker_agent/` → `src/superintend/` to match the repo and `pyproject.toml` project name. Mechanical (imports, `[tool.hatch.build.targets.wheel]` packages list, docstrings — ~21 files) but touches everything, so do it as its own commit before any Phase 2 code, not mixed into a feature change. The CLI entrypoint stays `tracker`; only the package name changes.
+
 A fully agent-owned tab, rewritten every run:
 - **Project snapshot** (3–5 sentences): phase, what moved this week, the top risks, and the next inspection or milestone
 - **By subcontractor** table: sub | open items | worst flag | one-line status | last activity date
