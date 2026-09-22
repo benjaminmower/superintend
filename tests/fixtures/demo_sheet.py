@@ -6,7 +6,7 @@ header, multi-select values, and a change log tab. No real project data.
 from __future__ import annotations
 
 from tracker_agent.config import ColumnsConfig, DateColumnConfig, SheetConfig, SpreadsheetConfig
-from tracker_agent.sheets import FakeSheetClient
+from tracker_agent.sources.gsheets.raw import FakeSheetClient
 
 TITLE_ROW = ["Fake Construction Co. Weekly Report - 123 Invented St", "", "", "", "", "", "", ""]
 HEADER_ROW = [

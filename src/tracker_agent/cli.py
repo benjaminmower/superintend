@@ -7,15 +7,14 @@ import datetime as dt
 import typer
 
 from tracker_agent.config import load_sheet_config
-from tracker_agent.gspread_client import GspreadClient
-from tracker_agent.parse.changelog import parse_changelog_tab
-from tracker_agent.parse.weekly import parse_weekly_tab
-from tracker_agent.sheets import (
+from tracker_agent.sources.gsheets.client import GspreadClient
+from tracker_agent.sources.gsheets.raw import (
     NoWeeklyTabFoundError,
     classify_tab,
     is_changelog_tab,
     latest_weekly_tab,
 )
+from tracker_agent.sources.gsheets.source import GSheetsSource
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -57,15 +56,16 @@ def inspect(
         typer.echo("\nNo weekly tab found.", err=True)
         raise typer.Exit(1) from exc
 
-    result = parse_weekly_tab(client, latest, sheet_config)
-    subs = {item.sub for item in result.items}
-    typer.echo(f"Header row: found; {len(result.items)} items across {len(subs)} subcontractors")
+    source = GSheetsSource(client, sheet_config)
+    result = source.items(spreadsheet.project_id)
+    groups = {item.group for item in result.items}
+    typer.echo(f"Header row: found; {len(result.items)} items across {len(groups)} subcontractors")
     for warning in result.warnings:
-        typer.echo(f"  warning: {warning.tab} row {warning.row}: {warning.message}", err=True)
+        typer.echo(f"  warning: {warning.location}: {warning.message}", err=True)
 
+    changes = source.history(spreadsheet.project_id)
     changelog_names = [t for t in client.tab_names() if is_changelog_tab(client, t, sheet_config)]
     if changelog_names:
-        changes = parse_changelog_tab(client, changelog_names[0])
         typer.echo(f"Change log: {len(changes)} rows in {changelog_names[0]!r}")
     else:
         typer.echo("Change log: not found", err=True)

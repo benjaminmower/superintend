@@ -1,4 +1,8 @@
-"""SheetClient protocol + GspreadClient (real) + FakeSheetClient (tests).
+"""Low-level raw-grid access for the Google Sheets adapter.
+
+SheetClient protocol + FakeSheetClient (tests). Not part of the public
+TrackerSource interface — source.GSheetsSource wraps this module and is
+what the rest of the codebase should import.
 
 Guardrail: all writes go through write_ai_cells() (latest weekly tab,
 ai_columns allow-list only) or write_agent_tab() (AI Brief / Ask / AI Log,

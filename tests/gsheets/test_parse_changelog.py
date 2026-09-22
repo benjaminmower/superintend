@@ -1,5 +1,10 @@
 from tests.fixtures.demo_sheet import make_demo_client
-from tracker_agent.parse.changelog import index_by_item, normalize_key, parse_changelog_tab
+from tracker_agent.sources.gsheets.parse_changelog import (
+    index_by_item,
+    normalize_key,
+    parse_changelog_tab,
+)
+from tracker_agent.sources.gsheets.parse_weekly import item_id
 
 
 def test_parse_changelog_reads_all_rows():
@@ -38,3 +43,14 @@ def test_index_by_item_sorts_oldest_first():
     group = index[key]
     timestamps = [c.timestamp for c in group]
     assert timestamps == sorted(timestamps)
+
+
+def test_to_change_produces_canonical_change_with_matching_item_id():
+    client = make_demo_client()
+    raw_changes = parse_changelog_tab(client, "Change log")
+
+    change = raw_changes[0].to_change("demo-1")
+
+    assert change.item_id == item_id("demo-1", "Framer", "Rough framing")
+    assert change.field == "STATUS"
+    assert change.new_value == "In progress"

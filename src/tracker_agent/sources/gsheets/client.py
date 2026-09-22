@@ -8,7 +8,7 @@ from pathlib import Path
 import gspread
 from google.oauth2.service_account import Credentials
 
-from tracker_agent.sheets import CellUpdate
+from tracker_agent.sources.gsheets.raw import CellUpdate
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",

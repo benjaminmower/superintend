@@ -1,7 +1,7 @@
 import pytest
 
 from tests.fixtures.demo_sheet import make_demo_client, make_sheet_config
-from tracker_agent.sheets import (
+from tracker_agent.sources.gsheets.raw import (
     AiColumnWriteError,
     CellUpdate,
     NotAgentTabError,
@@ -37,7 +37,7 @@ def test_latest_weekly_tab_picks_most_recent_by_sheet_order():
 
 
 def test_latest_weekly_tab_handles_year_rollover():
-    from tracker_agent.sheets import FakeSheetClient
+    from tracker_agent.sources.gsheets.raw import FakeSheetClient
 
     client = FakeSheetClient()
     header = ["SUBCONTRACTOR", "ITEM", "", "STATUS", "DETAILS", "NOTES"]
@@ -49,7 +49,7 @@ def test_latest_weekly_tab_handles_year_rollover():
 
 
 def test_latest_weekly_tab_raises_when_no_weekly_tab():
-    from tracker_agent.sheets import FakeSheetClient
+    from tracker_agent.sources.gsheets.raw import FakeSheetClient
 
     client = FakeSheetClient()
     client.add_tab("Change log", [["Timestamp", "User", "Sheet Name"]])
