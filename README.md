@@ -16,8 +16,9 @@ running against a real, active construction project — not just the demo.
 Phases 2–7 are ahead; see `SPEC.md` for the full roadmap.
 
 Full scope, the observed sheet structure, and phases: see `SPEC.md`.
-Repo conventions and guardrails: see `CLAUDE.md`. Work one phase at a
-time, in order.
+Repo conventions and guardrails: see `CLAUDE.md`. How results will be
+measured and reported, pinned before the numbers exist: see
+`docs/measuring-value.md`. Work one phase at a time, in order.
 
 Google Sheets is the first data source, not the architecture: every
 feature is written against a source-agnostic `TrackerSource` interface

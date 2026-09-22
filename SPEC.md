@@ -217,6 +217,8 @@ A fully agent-owned tab, rewritten every run:
 
 ## Phase 5: Eval, backtest, metrics, README
 
+The exact metric definitions, baselines to beat, and honesty rules for everything in this phase are pinned in `docs/measuring-value.md` — written before this phase is implemented, so results can't be tuned to flatter the tool afterward. Follow it, don't re-derive it here.
+
 **RAG eval:** `evals/questions.yaml` with 30–50 items of types `lookup | history | code | cross-source | not_found`. Measure retrieval hit@8, citation accuracy, answer correctness (keyword match + a Claude-as-judge pass), and not-found precision. The real-data eval stays private; the public repo uses the demo. If hit@8 is below ~85%, add embeddings (hybrid) and record the before and after numbers.
 
 **Flag backtest** (the strongest resume piece): use the change log to rebuild the tracker's state on every Monday from Aug to Dec 2025, run the flag rules as of that date, and check the outcomes. Did 🔴/🟠 items actually slip (their date moved, or they finished late)? Were items that slipped flagged beforehand? Report precision and recall and the lead time in days, then tune the thresholds from it.
@@ -303,6 +305,8 @@ class Verdict(BaseModel):
 9. **Respect `max_tokens`.** Per the Phase 1 bug log: a multi-item batch silently truncated at the 1024 default. Investigation traces are longer than next-action batches — set it explicitly and validate every response.
 
 ### The measurement (the portfolio payload)
+
+Metric definitions and honesty rules are pinned in `docs/measuring-value.md` §2 — this section summarizes; that doc is the source of truth.
 
 The Phase 5 backtest already replays Mondays from the Changelog and scores the rules. **Run the agent over the same replay.** The rules give the baseline for free:
 
