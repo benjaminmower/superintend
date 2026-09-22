@@ -37,34 +37,30 @@ a real name or address ends up in the demo. Instead, generate one from
 scratch, seeded entirely with the same invented data the test fixtures
 use (`tests/fixtures/demo_sheet.py`).
 
-Service accounts get effectively no storage quota in their own "My
-Drive", so the sheet has to be created inside a **Shared Drive**
-(Workspace accounts only) that the service account is a member of:
+Service accounts get effectively no storage quota of their own, so
+they can't *create* a new spreadsheet directly — you create a blank
+one yourself (your account has normal Drive quota), share it with the
+service account, and the script fills it in:
 
-1. https://drive.google.com → **Shared drives** → **+ New**. Name it
-   e.g. `tracker-agent`.
-2. Open it → **Manage members** → add the service account email from
-   step 3.5 with **Content Manager** (or **Manager**) access.
-3. Copy the Shared Drive's ID out of its URL:
-   `https://drive.google.com/drive/folders/<SHARED_DRIVE_ID>`.
+1. https://sheets.google.com → **Blank spreadsheet**. Name it
+   `Tracker (demo)`.
+2. **Share** → paste in the service account email from step 3.5 →
+   **Editor** → uncheck "Notify people" → Share.
+3. Copy the sheet's ID out of its URL:
+   `https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit`.
 
 Then:
 
 ```bash
-uv run python -m scripts.make_demo_sheet \
-  --shared-drive <SHARED_DRIVE_ID> \
-  --share you@example.com
+uv run python -m scripts.make_demo_sheet --sheet-id <SHEET_ID>
 ```
 
-`--share` also grants your own Google account Editor access so you can
-open it in a browser (the service account owns it by default, since it
-creates it). The script prints the new sheet's ID — save it, you'll need
-it in step 6.
+The script prints the sheet's ID again for confirmation — save it,
+you'll need it in step 6.
 
 ## 5. Share the real tracker with the service account
 
-The demo sheet is already shared (the service account created it in step
-4). For the **real** tracker:
+Same as step 4.2, but on the real tracker:
 
 1. Open the sheet → **Share**.
 2. Paste in the service account email from step 3.5.

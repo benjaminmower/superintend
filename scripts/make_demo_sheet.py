@@ -1,23 +1,23 @@
-"""One-time setup script: create the demo spreadsheet from scratch.
+# /// script
+# dependencies = ["gspread", "google-auth"]
+# ///
+"""One-time setup script: seed the demo spreadsheet with fixture data.
 
-Builds a brand-new Google Sheet seeded with the same invented data as
-tests/fixtures/demo_sheet.py — never a copy of the real tracker, so
+Writes the same invented data as tests/fixtures/demo_sheet.py into an
+*existing*, empty Google Sheet — never a copy of the real tracker, so
 there's no hand-scrubbing step and no risk of a missed real name or
-address leaking into the demo. Prints the new sheet's ID to put in
-.env as SHEET_ID_DEMO.
+address leaking into the demo.
+
+You create the blank spreadsheet yourself first (your own account has
+normal Drive quota; a service account's own quota is ~0 and Shared
+Drives add their own headaches — see docs/setup.md step 4), share it
+with the service account as an Editor, then this script fills it in.
 
 Usage:
-    uv run python -m scripts.make_demo_sheet --shared-drive <ID> [--share you@example.com]
+    uv run python -m scripts.make_demo_sheet --sheet-id <ID>
 
-Requires GOOGLE_SERVICE_ACCOUNT_FILE (see docs/setup.md) and a service
-account with the Drive file-creation scope, already true of the scopes
-in sources/gsheets/client.py.
-
-Service accounts get ~0 usable quota in their own "My Drive", so the
-sheet must be created inside a Shared Drive (Workspace-only) that the
-service account is a member of — see docs/setup.md step 4. Pass that
-Shared Drive's ID (from its URL: drive.google.com/drive/folders/<ID>)
-via --shared-drive.
+Requires GOOGLE_SERVICE_ACCOUNT_FILE (see docs/setup.md) and the sheet
+already shared with the service account as Editor.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from tests.fixtures.demo_sheet import CHANGELOG_GRID, WEEKLY_GRID
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
 ]
 
 TABS: list[tuple[str, list[list[str]]]] = [
@@ -51,16 +50,11 @@ TABS: list[tuple[str, list[list[str]]]] = [
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--shared-drive",
+        "--sheet-id",
         required=True,
-        help="ID of a Shared Drive the service account is a member of. Service "
-        "accounts have ~0 quota in their own My Drive, so the sheet must be "
-        "created here instead (see docs/setup.md step 4).",
-    )
-    parser.add_argument(
-        "--share",
-        help="Also share the new sheet (Editor) with this email — your own account, "
-        "so you can open it in a browser. The service account already owns it.",
+        help="ID of an existing, empty Google Sheet (from its URL: "
+        "docs.google.com/spreadsheets/d/<ID>/edit), already shared with "
+        "the service account as Editor.",
     )
     args = parser.parse_args()
 
@@ -72,22 +66,22 @@ def main() -> None:
 
     creds = Credentials.from_service_account_file(str(credentials_file), scopes=SCOPES)
     gc = gspread.authorize(creds)
+    spreadsheet = gc.open_by_key(args.sheet_id)
 
-    spreadsheet = gc.create("Tracker (demo)", folder_id=args.shared_drive)
+    existing_default = spreadsheet.sheet1 if len(spreadsheet.worksheets()) == 1 else None
 
     first = True
     for name, grid in TABS:
-        ws = spreadsheet.sheet1 if first else spreadsheet.add_worksheet(name, rows=100, cols=20)
-        if first:
+        if first and existing_default is not None:
+            ws = existing_default
             ws.update_title(name)
-            first = False
+        else:
+            ws = spreadsheet.add_worksheet(name, rows=100, cols=20)
+        first = False
         if grid:
             ws.update(values=grid, range_name="A1")
 
-    if args.share:
-        spreadsheet.share(args.share, perm_type="user", role="writer")
-
-    print(f"Created {spreadsheet.title!r}: {spreadsheet.id}")
+    print(f"Seeded {spreadsheet.title!r}: {spreadsheet.id}")
     print(f"\nSHEET_ID_DEMO={spreadsheet.id}")
     print("\nAdd that line to .env, then:")
     print("  uv run tracker inspect --project demo-1")
