@@ -2,78 +2,113 @@
 
 from __future__ import annotations
 
+import datetime as dt
+
 import typer
 
-from tracker_agent.config import load_settings
+from tracker_agent.config import load_sheet_config
 from tracker_agent.gspread_client import GspreadClient
-from tracker_agent.sheets import NoWeeklyTabFoundError, latest_weekly_tab
+from tracker_agent.parse.changelog import parse_changelog_tab
+from tracker_agent.parse.weekly import parse_weekly_tab
+from tracker_agent.sheets import (
+    NoWeeklyTabFoundError,
+    classify_tab,
+    is_changelog_tab,
+    latest_weekly_tab,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
 
 @app.command()
-def inspect(demo: bool = typer.Option(True, help="Use SHEET_ID_DEMO instead of SHEET_ID.")) -> None:
-    """List tabs, headers, row count, and 3 sample rows. Read-only.
+def inspect(
+    project: str = typer.Option(None, help="project_id from sheet.yaml; defaults to the first."),
+) -> None:
+    """List tabs, classify each, and report the latest weekly tab. Read-only."""
+    sheet_config = load_sheet_config()
 
-    Sample rows are printed to the terminal only, never saved to disk.
-    """
-    settings = load_settings()
-    sheet_id = settings.sheet.id_demo if demo else settings.sheet.id
+    spreadsheet = sheet_config.spreadsheets[0]
+    if project:
+        matches = [s for s in sheet_config.spreadsheets if s.project_id == project]
+        if not matches:
+            typer.echo(f"No spreadsheet with project_id={project!r} in sheet.yaml.", err=True)
+            raise typer.Exit(1)
+        spreadsheet = matches[0]
+
+    sheet_id = spreadsheet.sheet_id()
     if not sheet_id:
-        var = "SHEET_ID_DEMO" if demo else "SHEET_ID"
-        typer.echo(f"{var} is not set (check .env).", err=True)
+        typer.echo(f"{spreadsheet.sheet_id_env} is not set (check .env).", err=True)
         raise typer.Exit(1)
 
     client = GspreadClient(sheet_id)
 
-    try:
-        latest = latest_weekly_tab(client)
-        typer.echo(f"Latest weekly tab: {latest}\n")
-    except NoWeeklyTabFoundError:
-        typer.echo("No weekly tab (\"wk M/D\") found yet.\n", err=True)
+    typer.echo(f"# {spreadsheet.project_id} ({sheet_id})\n")
 
     for tab in client.tab_names():
-        headers = client.headers(tab)
-        rows = client.read_rows(tab)
-        typer.echo(f"# {tab} ({len(rows)} rows)")
-        for header in headers:
-            typer.echo(f"  - {header}")
-        typer.echo("  sample rows:")
-        for row in rows[:3]:
-            typer.echo(f"    {row}")
+        role = classify_tab(tab, sheet_config)
+        if role == "other" and is_changelog_tab(client, tab, sheet_config):
+            role = "changelog"
+        typer.echo(f"{tab!r}: {role}")
+
+    try:
+        latest = latest_weekly_tab(client, sheet_config, start_year=dt.date.today().year)
+        typer.echo(f"\nLatest weekly tab: {latest}")
+    except NoWeeklyTabFoundError as exc:
+        typer.echo("\nNo weekly tab found.", err=True)
+        raise typer.Exit(1) from exc
+
+    result = parse_weekly_tab(client, latest, sheet_config)
+    subs = {item.sub for item in result.items}
+    typer.echo(f"Header row: found; {len(result.items)} items across {len(subs)} subcontractors")
+    for warning in result.warnings:
+        typer.echo(f"  warning: {warning.tab} row {warning.row}: {warning.message}", err=True)
+
+    changelog_names = [t for t in client.tab_names() if is_changelog_tab(client, t, sheet_config)]
+    if changelog_names:
+        changes = parse_changelog_tab(client, changelog_names[0])
+        typer.echo(f"Change log: {len(changes)} rows in {changelog_names[0]!r}")
+    else:
+        typer.echo("Change log: not found", err=True)
 
 
 @app.command()
-def summarize(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
-    """Phase 1: write short summaries to the AI summary column."""
+def flag(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
+    """Phase 1: AI Flag + AI Next Action on the latest weekly tab."""
     typer.echo("Not implemented yet: Phase 1 (see SPEC.md).", err=True)
     raise typer.Exit(1)
 
 
 @app.command()
-def flag(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
-    """Phase 2: flag at-risk rows."""
+def brief(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
+    """Phase 2: rewrite the AI Brief tab."""
     typer.echo("Not implemented yet: Phase 2 (see SPEC.md).", err=True)
     raise typer.Exit(1)
 
 
 @app.command()
-def digest(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
-    """Phase 3: send (or print) the weekly digest email."""
+def report(dry_run: bool = typer.Option(False, "--dry-run")) -> None:
+    """Phase 3: draft (or send) the weekly report email."""
+    typer.echo("Not implemented yet: Phase 3 (see SPEC.md).", err=True)
+    raise typer.Exit(1)
+
+
+@app.command(name="roll-week")
+def roll_week(apply: bool = typer.Option(False, "--apply")) -> None:
+    """Phase 3 (optional): duplicate the latest weekly tab for the coming week."""
     typer.echo("Not implemented yet: Phase 3 (see SPEC.md).", err=True)
     raise typer.Exit(1)
 
 
 @app.command()
 def ingest() -> None:
-    """Phase 4: index Drive docs for RAG."""
+    """Phase 4: index Drive docs + tracker history for RAG."""
     typer.echo("Not implemented yet: Phase 4 (see SPEC.md).", err=True)
     raise typer.Exit(1)
 
 
 @app.command()
 def ask(question: str) -> None:
-    """Phase 4: answer a question from indexed project documents."""
+    """Phase 4: answer a question from indexed project documents and tracker history."""
     typer.echo("Not implemented yet: Phase 4 (see SPEC.md).", err=True)
     raise typer.Exit(1)
 
@@ -88,6 +123,13 @@ def watch() -> None:
 @app.command()
 def eval() -> None:
     """Phase 5: run the RAG eval set."""
+    typer.echo("Not implemented yet: Phase 5 (see SPEC.md).", err=True)
+    raise typer.Exit(1)
+
+
+@app.command()
+def backtest() -> None:
+    """Phase 5: replay flag rules against change-log history."""
     typer.echo("Not implemented yet: Phase 5 (see SPEC.md).", err=True)
     raise typer.Exit(1)
 

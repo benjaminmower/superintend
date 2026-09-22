@@ -1,19 +1,18 @@
 # Model ID lives here and nowhere else in the codebase.
 model: "claude-sonnet-5"
 
-sheet:
-  id: "${SHEET_ID}"
-  id_demo: "${SHEET_ID_DEMO}"
-
 flags:
-  stale_after_days: 7
+  our_move_days: 2
+  chase_days: 4
+  due_soon_days: 7
+  stale_days: 10
 
-digest:
+report:
   recipients: []
-  send_day: "monday"
+  send_day: "friday"
   send_hour: 7
 
 rag:
-  chunk_size_tokens: 500
-  chunk_overlap_tokens: 50
-  top_k: 6
+  chunk_size_tokens: 800
+  chunk_overlap_tokens: 100
+  top_k: 8

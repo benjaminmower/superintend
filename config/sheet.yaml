@@ -1,49 +1,30 @@
-# Column mapping, generated as a starting point by `tracker inspect`,
-# then hand-edited. Map by header TEXT, never by letter or index — the
-# boss may reorder columns.
-#
-# The tracker is a weekly-snapshot sheet: each week's data lives in its
-# own tab named "wk M/D" (e.g. "wk 09/21"). tracker-agent always operates
-# on the most recent weekly tab (see sheets.latest_weekly_tab()). The
-# other tabs are fixed, single-purpose tabs.
+# Column mapping and tab-detection rules, generated as a starting point by
+# `tracker inspect`, then hand-edited. Map by header TEXT, never by
+# hard-coded letters (except the documented DATE fallback below) — see
+# CLAUDE.md's "Sheet quirks to respect".
 
-weekly_tabs:
-  name_pattern: "wk {M}/{D}"     # tab naming convention; parsed to find "latest"
-  key_column: "Project"           # unique row id within a weekly tab
+spreadsheets:
+  - project_id: demo-1              # slug; keep real project names out of the public repo
+    sheet_id_env: SHEET_ID_DEMO     # real ID lives in .env
 
-  columns:                        # semantic name -> header text in the sheet
-    project: "Project"
-    address: "Address"
-    phase: "Phase"
-    status: "Status"
-    next_milestone: "Next Milestone"
-    milestone_date: "Target Date"
-    notes: "Notes"
-    permit_status: "Permit"
-    inspection_next: "Next Inspection"
+changelog_tab: auto                 # detect by header "Timestamp, User, Sheet Name"
+weekly_tab_regex: '^\s*(wk|week)\s*(of\s*)?(\d{1,2})/(\d{1,2})\s*$'
+ignore_tab_regex: '^copy of'
 
-  ai_columns:                     # columns G-H; the ONLY columns the agent may write
-    summary: "AI Summary"
-    next_action: "AI Next Action"
-    flag: "AI Flag"
-    flag_reason: "AI Flag Reason"
-    updated: "AI Updated"
+columns:
+  sub: SUBCONTRACTOR
+  item: ITEM
+  date: {header: DATE, fallback_after: ITEM}
+  status: STATUS
+  details: DETAILS
+  notes: NOTES
 
-change_log_tab: "Change log"      # read-only; an Apps Script logs edits here
+ai_columns:                          # appended right of NOTES on the latest weekly tab ONLY
+  flag: "AI Flag"
+  next_action: "AI Next Action"
 
-ai_brief_tab: "AI Brief"          # agent-owned; replaced in full each run
+agent_tabs: ["AI Brief", "Ask", "AI Log"]   # fully agent-owned
 
-ask_tab:
-  name: "Ask"
-  columns:
-    question: "Question"
-    project: "Project"
-  ai_columns:                     # everything past the human-entered question
-    answer: "Answer"
-    sources: "Sources"
-    confidence: "Confidence"
-    status: "Status"
-    asked: "Asked"
-    answered: "Answered"
-
-ai_log_tab: "AI Log"              # agent-owned; run history visible to the boss
+done_status: [Completed, Cancelled]
+ball_in_our_court: [Need to Respond, Needs Clarification, Seeking Approval]
+waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed Up"]

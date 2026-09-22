@@ -9,21 +9,18 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from typing import TypeVar
 
 import anthropic
 from pydantic import BaseModel, ValidationError
 
 from tracker_agent import state
 
-T = TypeVar("T", bound=BaseModel)
-
 
 class LlmOutputError(ValueError):
     """Raised when the model's output fails schema validation twice."""
 
 
-def call_llm(
+def call_llm[T: BaseModel](
     *,
     client: anthropic.Anthropic,
     model: str,
@@ -76,4 +73,6 @@ def call_llm(
         )
         return parsed
 
-    raise LlmOutputError(f"LLM output failed validation twice for command={command!r}") from last_error
+    raise LlmOutputError(
+        f"LLM output failed validation twice for command={command!r}"
+    ) from last_error

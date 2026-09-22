@@ -65,16 +65,21 @@ GOOGLE_SERVICE_ACCOUNT_FILE=credentials/service_account.json
 ```
 
 SMTP variables (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`) are needed
-starting in Phase 3 (weekly digest email) — a Gmail app password works
-for `SMTP_USER`/`SMTP_PASSWORD` with `SMTP_HOST=smtp.gmail.com`. Not
-needed yet for Phase 0.
+starting in Phase 3 (the weekly report email) — a Gmail app password
+works for `SMTP_USER`/`SMTP_PASSWORD` with `SMTP_HOST=smtp.gmail.com`.
+Not needed yet for Phase 0.
+
+`config/sheet.yaml`'s `spreadsheets:` list maps a `project_id` to the
+`.env` variable holding its sheet ID (`sheet_id_env: SHEET_ID_DEMO` by
+default). All development runs against the demo project; add a second
+entry once you're ready to point at the real sheet.
 
 ## 7. Verify
 
 ```bash
 uv sync
-uv run tracker inspect          # reads the demo sheet by default
-uv run tracker inspect --no-demo  # reads the real sheet
+uv run tracker inspect                  # reads the default (first) project in sheet.yaml
+uv run tracker inspect --project demo-1 # reads a specific project_id
 ```
 
 `inspect` is read-only — it cannot write anything, so it's safe to run

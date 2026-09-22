@@ -27,19 +27,14 @@ def _expand_env(value: object) -> object:
     return value
 
 
-class SheetSettings(BaseModel):
-    id: str = ""
-    id_demo: str = ""
-
-
 class FlagSettings(BaseModel):
+    our_move_days: int = 2
+    chase_days: int = 4
     due_soon_days: int = 7
     stale_days: int = 10
-    inspection_risk_days: int = 3
-    llm_soft_flags: bool = True
 
 
-class DigestSettings(BaseModel):
+class ReportSettings(BaseModel):
     recipients: list[str] = []
     send_day: str = "friday"
     send_hour: int = 7
@@ -53,51 +48,56 @@ class RagSettings(BaseModel):
 
 class Settings(BaseModel):
     model: str
-    sheet: SheetSettings = SheetSettings()
     flags: FlagSettings = FlagSettings()
-    digest: DigestSettings = DigestSettings()
+    report: ReportSettings = ReportSettings()
     rag: RagSettings = RagSettings()
 
 
-class WeeklyTabConfig(BaseModel):
-    """Column mapping shared by every "wk M/D" weekly snapshot tab."""
+class SpreadsheetConfig(BaseModel):
+    project_id: str
+    sheet_id_env: str
 
-    name_pattern: str = "wk {M}/{D}"
-    key_column: str
-    columns: dict[str, str] = {}
-    ai_columns: dict[str, str] = {}
-
-    def ai_column_headers(self) -> set[str]:
-        """The only headers write_ai_cells() may touch on a weekly tab."""
-        return set(self.ai_columns.values())
+    def sheet_id(self) -> str:
+        return os.environ.get(self.sheet_id_env, "")
 
 
-class AskTabConfig(BaseModel):
-    """Column mapping for the Ask tab (Question in, Answer/etc. out)."""
+class DateColumnConfig(BaseModel):
+    header: str = "DATE"
+    fallback_after: str  # if the header is blank, use the column right after this one
 
-    name: str = "Ask"
-    columns: dict[str, str] = {}
-    ai_columns: dict[str, str] = {}
 
-    def ai_column_headers(self) -> set[str]:
-        """The only headers write_ai_cells() may touch on the Ask tab."""
-        return set(self.ai_columns.values())
+class ColumnsConfig(BaseModel):
+    sub: str
+    item: str
+    date: DateColumnConfig
+    status: str
+    details: str
+    notes: str
 
 
 class SheetConfig(BaseModel):
-    """Tab roles for the tracker spreadsheet (config/sheet.yaml).
+    """Tab-detection rules and column mapping (config/sheet.yaml).
 
-    weekly_tabs maps the recurring "wk M/D" tabs; change_log_tab is
-    read-only (an Apps Script writes it); ai_brief_tab and ai_log_tab are
-    wholly agent-owned (no allow-list — every cell is fair game); ask_tab
-    is a mix of human-owned (Question) and agent-owned columns.
+    Human columns (sub/item/date/status/details/notes) are read-only.
+    ai_columns are the only headers write_ai_cells() may touch on the
+    latest weekly tab. agent_tabs are wholly agent-owned (AI Brief, Ask,
+    AI Log) — every cell on those tabs is fair game.
     """
 
-    weekly_tabs: WeeklyTabConfig
-    change_log_tab: str
-    ai_brief_tab: str
-    ask_tab: AskTabConfig
-    ai_log_tab: str
+    spreadsheets: list[SpreadsheetConfig]
+    changelog_tab: str = "auto"
+    weekly_tab_regex: str
+    ignore_tab_regex: str
+    columns: ColumnsConfig
+    ai_columns: dict[str, str]
+    agent_tabs: list[str] = []
+    done_status: list[str] = []
+    ball_in_our_court: list[str] = []
+    waiting_on_others: list[str] = []
+
+    def ai_column_headers(self) -> set[str]:
+        """The only headers write_ai_cells() may touch on the latest weekly tab."""
+        return set(self.ai_columns.values())
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -109,5 +109,6 @@ def load_settings(path: Path | None = None) -> Settings:
 
 def load_sheet_config(path: Path | None = None) -> SheetConfig:
     path = path or REPO_ROOT / "config" / "sheet.yaml"
+    load_dotenv(REPO_ROOT / ".env", override=False)
     raw = yaml.safe_load(path.read_text()) or {}
     return SheetConfig.model_validate(raw)

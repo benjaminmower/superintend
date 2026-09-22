@@ -1,92 +1,41 @@
 # tracker-agent
 
-An AI layer on top of an existing Google Sheets construction project tracker.
-The sheet stays the only interface the team uses; this service reads it,
-writes to its own AI columns, flags risk, emails a weekly digest, and
-answers questions from project documents (RAG) with citations.
+An AI layer on top of an existing Google Sheets weekly construction
+tracker — one spreadsheet per project, a new `wk M/D` tab duplicated each
+week, and a change-log tab that already records every edit. The sheet
+stays the only interface the team uses. This service flags at-risk
+items, writes next actions, keeps an AI Brief tab, drafts the weekly
+report email, and answers questions from project documents and tracker
+history (RAG) with citations.
 
-The tracker is a **weekly-snapshot sheet**: current data lives in a tab
-named `"wk M/D"` (e.g. `"wk 09/21"`), and a new one rolls forward each
-week. tracker-agent always operates on the most recent weekly tab. Other
-tabs are fixed and single-purpose: **Change log** (read-only, written by
-an Apps Script), **AI Brief** and **AI Log** (agent-owned), and **Ask**
-(mixed — human asks a question, agent fills in the answer). See
-`SPEC.md`'s Architecture section for the full diagram.
+Full scope, the observed sheet structure, and phases: see `SPEC.md`.
+Repo conventions and guardrails: see `CLAUDE.md`. Work one phase at a
+time, in order.
 
-Full scope and phases: see `SPEC.md`. Work one phase at a time, in order.
-
-## Stack
-
-- Python 3.12, managed with `uv`
-- `gspread` + `google-auth` (service account) for Sheets and Drive
-- `anthropic` SDK for all LLM calls. The model ID lives in
-  `config/settings.yaml` and nowhere else.
-- SQLite (stdlib `sqlite3`) for state: row snapshots, run log, doc chunks
-  (FTS5)
-- `pymupdf` for PDF text extraction
-- `typer` for the CLI, `pydantic` for config and LLM output schemas,
-  `pytest` for tests
-
-## Commands
+## Quickstart
 
 ```bash
-uv sync                                   # install
-uv run tracker inspect                    # tabs, headers, row count, 3 sample rows (demo sheet, read-only)
-uv run tracker inspect --no-demo          # same, against the real sheet
-uv run tracker summarize [--dry-run]      # Phase 1
-uv run tracker flag [--dry-run]           # Phase 2
-uv run tracker digest [--dry-run]         # Phase 3 (dry-run writes out/digest-YYYY-MM-DD.html instead of sending)
-uv run tracker ingest                     # Phase 4: index Drive docs
-uv run tracker ask "question"             # Phase 4: answer from the CLI
-uv run tracker watch                      # Phase 4: poll the Ask tab and answer new questions
-uv run tracker eval                       # Phase 5: run the RAG eval set
-uv run tracker stats                      # Phase 5: print metrics from the run log
+uv sync
+uv run tracker inspect        # tabs, latest week, header row, column mapping (read-only)
 uv run pytest
 ```
 
 Google Cloud / service account setup: see `docs/setup.md`.
 
-## Layout
-
-```
-src/tracker_agent/
-  cli.py            # typer entrypoints only; no business logic
-  config.py         # loads settings.yaml + sheet.yaml + .env into pydantic models
-  sheets.py         # SheetClient protocol + GspreadClient + FakeSheetClient (tests)
-  llm.py            # single wrapper around anthropic; retries, token logging, JSON schema output
-  state.py          # SQLite: snapshots, run_log, chunks
-  summarize.py  flags.py  digest.py
-  rag/ ingest.py  retrieve.py  answer.py
-config/
-  settings.yaml     # model, thresholds, schedule, email recipients
-  sheet.yaml        # tab roles + column mapping (generated in Phase 0, then hand-edited):
-                     #   weekly_tabs (the "wk M/D" tabs), change_log_tab, ai_brief_tab,
-                     #   ask_tab, ai_log_tab
-evals/questions.yaml
-tests/fixtures/     # FAKE data only
-```
-
 ## Guardrails (non-negotiable)
 
-1. **Never write to a column not listed under `ai_columns` in `sheet.yaml`.** All writes go through `sheets.write_ai_cells()`, which enforces this on tabs that have an allow-list (weekly tabs, Ask). Human-owned cells are read-only to this code. `AI Brief` and `AI Log` are wholly agent-owned, so `write_ai_cells()` skips the allow-list there (pass `allowed_headers=None`).
-2. **`--dry-run` must work for every write command.** It prints the diff of what would change and writes nothing.
-3. **Batch writes.** One `batch_update` per run, not per cell (Sheets API quotas).
-4. **No real project data in git.** Not in tests, fixtures, evals, README, or commit messages. `.env`, `credentials/`, `data/`, and `*.db` are gitignored. Fixtures use invented projects and addresses.
-5. **RAG answers must cite a source** (doc name + page, sheet number, or spec section). If retrieval finds nothing relevant, the answer is "Not found in project documents", never a guess.
-6. **Every LLM call goes through `llm.py`** so tokens, latency, and cost are logged to `run_log`.
-7. Deterministic logic first, LLM second. Date math, staleness, and overdue checks are plain Python; the LLM only writes the human-readable reason or summary.
+1. Writes are allow-listed: only `ai_columns` on the **latest** weekly
+   tab, plus the fully agent-owned tabs (`AI Brief`, `Ask`'s answer
+   columns, `AI Log`). Human columns A–F, title rows, older weekly tabs,
+   and the change log are read-only. Enforced in `sheets.write_ai_cells()`
+   / `write_agent_tab()`.
+2. `--dry-run` works for every write command and prints the exact diff.
+3. If parsing is uncertain, stop and log — never write.
+4. One batch update per run.
+5. No real project data in git — `.env`, `credentials/`, `data/`, `out/`,
+   `*.db` are gitignored; fixtures use invented names.
+6. RAG answers cite a source, or say "Not found."
+7. Every LLM call goes through `llm.py`; deterministic logic runs first.
 
-## Conventions
-
-- Map columns by header name through `sheet.yaml`, never by letter or index. The boss may reorder columns.
-- Always resolve the current weekly tab with `sheets.latest_weekly_tab()`; never hardcode a tab name.
-- Treat blank, "TBD", "n/a", and malformed dates as missing, not as errors. Log them.
-- LLM outputs use pydantic schemas; validate, and on failure retry once, then skip the row and log it.
-- Keep AI cell text short: summaries ≤ 200 characters, flag reasons ≤ 100.
-- Type hints everywhere; `ruff` for lint and format.
-
-## Verifying a change
-
-- `uv run pytest` passes (tests use `FakeSheetClient`, no network).
-- Run the command with `--dry-run` against the **demo sheet** (`SHEET_ID_DEMO`) and check the printed diff.
-- Only then run it against the real sheet (`SHEET_ID`).
+See `CLAUDE.md` for the full list and the sheet-parsing quirks (fill-down,
+the blank DATE header, multi-select cleanup, tab-naming drift).

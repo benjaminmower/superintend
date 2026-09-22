@@ -28,18 +28,35 @@ class GspreadClient:
     def tab_names(self) -> list[str]:
         return [ws.title for ws in self._spreadsheet.worksheets()]
 
-    def headers(self, tab: str) -> list[str]:
+    def all_values(self, tab: str) -> list[list[str]]:
         ws = self._spreadsheet.worksheet(tab)
-        return ws.row_values(1)
+        return ws.get_all_values()
 
-    def read_rows(self, tab: str) -> list[dict[str, str]]:
+    def headers(self, tab: str, header_row: int = 1) -> list[str]:
         ws = self._spreadsheet.worksheet(tab)
-        return ws.get_all_records()
+        return ws.row_values(header_row)
+
+    def read_rows(self, tab: str, header_row: int = 1) -> list[dict[str, str]]:
+        headers = self.headers(tab, header_row)
+        grid = self.all_values(tab)[header_row:]
+        rows = []
+        for raw_row in grid:
+            padded = raw_row + [""] * (len(headers) - len(raw_row))
+            rows.append(dict(zip(headers, padded, strict=False)))
+        return rows
 
     def batch_write(self, tab: str, updates: list[CellUpdate]) -> None:
         ws = self._spreadsheet.worksheet(tab)
-        header_row = ws.row_values(1)
-        col_index = {h: i + 1 for i, h in enumerate(header_row)}
+        # The header row for a weekly tab isn't necessarily row 1 (there's
+        # a title row above it), so find each update's header by scanning
+        # the first 10 rows rather than assuming row 1.
+        grid = ws.get_values("A1:Z10")
+        col_index: dict[str, int] = {}
+        for row in grid:
+            for i, cell in enumerate(row, start=1):
+                if cell and cell not in col_index:
+                    col_index[cell] = i
+
         body = [
             {
                 "range": gspread.utils.rowcol_to_a1(u.row, col_index[u.header]),

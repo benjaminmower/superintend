@@ -2,294 +2,252 @@
 
 ## Goal
 
-Add an AI layer to the Google Sheets project tracker for construction
-professional services, **without changing how the team works**. The boss
-keeps using the same sheet. The agent:
+Add an AI layer to the existing Google Sheets weekly construction tracker **without changing how the team works**. The boss keeps reading the same sheet. The agent:
 
-1. Writes a daily status summary and next action for each project row
-2. Flags at-risk rows with a short reason
-3. Emails a plain-English weekly digest
-4. Answers questions from project documents (specs, plans, LADBS plan
-   check, Title 24) with citations, through an "Ask" tab
+1. Flags at-risk items and writes a next action on each row
+2. Writes a project brief (overall and per subcontractor) to its own tab
+3. Drafts the weekly report and emails it
+4. Answers questions from project documents **and the tracker's own history**, with citations, through an "Ask" tab
 
-**Portfolio goal:** a public repo with a demo sheet of fake data, a README
-with architecture and tradeoffs, an eval with real accuracy numbers, and
-usage metrics.
+**Portfolio goal:** a public repo with a demo sheet of fake data, a README with architecture and tradeoffs, eval and backtest numbers, and usage metrics.
+
+---
+
+## The tracker as it exists today (observed)
+
+**One spreadsheet per project.** Tab 1 is a change log; the other tabs are weekly snapshots.
+
+### Weekly tabs
+- One tab per week, made by duplicating last week's tab. Names are inconsistent: `Wk 7/28`, `Wk of 8/18`, `wk 12/1`. Stray tabs like `Copy of Wk 8/4` exist.
+- Row 1 is a title ("<Company> Weekly Report - <address>"), followed by a header row. Data starts around row 4.
+- Columns:
+
+| Col | Header | Meaning | Values |
+|---|---|---|---|
+| A | SUBCONTRACTOR | Group label, **only on the first row of each group** (fill down) | Trade or company name; also "LA DBS" and the GC for its own tasks |
+| B | ITEM | The task | free text |
+| C | *(blank header)* | Target or completed date. The change log calls it `DATE` | M/D/YYYY, often blank |
+| D | STATUS | Lifecycle | Not started, In progress, Completed, Blocked, Cancelled; sometimes a multi-select like "Blocked, Completed" |
+| E | DETAILS | Who has the ball | Done!, On the schedule, Waiting for Response, Needs Clarification, Need to Respond, Seeking Approval, Reached out, No Answer – Followed Up, Cancelled |
+| F | NOTES | Narrative | free text, often rich (decisions, inspector names, field changes) |
+
+### Change log tab
+`Timestamp, User, Sheet Name, Row, Column Name, Old Value, New Value, Item (Current), Subcontractor (Current)`. It's written by an edit trigger and holds about 570 rows of history since July 2025.
+
+**Why this matters:** the change log gives us history for free. We use it for staleness, "what changed this week", time spent in each status, and replaying the sheet on past dates to backtest. **No snapshot-diffing is needed.**
+
+**Note:** edits made through the Sheets API don't fire `onEdit` triggers, so the agent's own writes won't pollute the change log. That's good, but it also means the agent's changes need their own audit trail (`run_log` plus an AI Log tab).
+
+---
+
+## Portability: the tracker is an adapter
+
+Google Sheets is the first source, not the design. Everything above the `TrackerSource` interface (flags, brief, report, backtest, RAG) works on the canonical `Item` / `Change` model defined in `CLAUDE.md`. Swapping trackers means writing one adapter and passing the contract suite.
+
+**Adapters, roughly in order of effort:**
+
+| Source | How | Notes |
+|---|---|---|
+| **Google Sheets** (MVP) | gspread | The messiest one. Doing it first proves the interface survives real-world mess. |
+| **Fake** | in-memory | Ships with the repo; powers all tests and the demo. |
+| **CSV / Excel export** | pandas | The universal fallback: nearly every tracker exports one. Read-only, so `WRITE_*` capabilities are off and output goes to email. |
+| **Airtable / monday / Smartsheet** | REST API | Closest in shape to the sheet: rows, a status field, an owner, and a change history. |
+| **Procore / Buildertrend / Fieldwire** | REST API, OAuth | The real industry targets. Richer objects (RFIs, submittals, punch items, daily logs), so the adapter flattens each into `Item` with `group` = trade or spec section. Check API access tier and sandbox availability before committing; Procore has a developer sandbox. |
+| **MS Project / P6 XER** | file parse | Schedule-shaped, not task-shaped. Read-only; `Item.due_date` = the activity's early finish. |
+
+**Adapter checklist** (in `docs/adapters.md`, written during Phase 0 and followed for each new source):
+1. Declare capabilities.
+2. Map the source's vocabulary to `status` and `ball` in `sources.yaml`.
+3. Give each item a stable `id` (the Sheets adapter hashes normalized (sub, item), because row numbers move).
+4. Implement `health()` so a bad parse or an expired token stops the run instead of writing junk.
+5. Pass `tests/contract/`.
+6. Record rate limits and pagination in the adapter's docstring.
+
+**Push vs. pull:** the MVP polls. Adapters with `WEBHOOKS` can later feed the same handlers; nothing above the interface changes.
+
+**The resume value is exactly this seam.** "Built a tracker-agnostic agent with a capability-based adapter layer; added Procore in ~200 lines and no changes to the feature code" is a stronger line than any single integration. Keep the adapter diff small and show it in the README.
 
 ## Non-goals (MVP)
 
 - No web UI and no new tools for the boss to learn
-- No edits to human-owned cells
-- No autonomous sending of RFIs or emails to subs or clients (the weekly
-  digest to the boss is the only outbound message)
-- No multi-user auth; one service account and one sheet
+- No edits to human-owned cells (A–F), the title row, or the change log
+- No messages sent to subs, inspectors, or clients. The weekly email goes to Bronco (and the boss once approved) only
+- No multi-user auth; one service account
 
 ## Architecture
 
 ```
 Project spreadsheet
-  ├─ Change log tab   ──read──┐   (an Apps Script writes edit history here:
-  ├─ wk M/D tabs      ──read──┤    cell, old value, new value, timestamp, user)
-  │    └─ AI cols G–H <─write─┤
-  ├─ AI Brief tab     <─write─┤   tracker-agent (Python CLI, launchd/cron)
-  ├─ Ask tab          <─r/w──┤     ├─ parse: latest tab, fill-down, normalize
-  └─ AI Log tab       <─write─┘     ├─ flag / next-action / brief / report
-                                     ├─ rag: docs + tracker history → SQLite FTS5 → Claude
-Google Drive folder (plans, specs,   └─ state.db (run_log, chunks, parsed history)
-  LADBS, soils reports) ──read──┘
+  ├─ Change log tab   ──read──┐
+  ├─ wk M/D tabs      ──read──┤   tracker-agent (Python CLI, launchd/cron)
+  │    └─ AI cols G–H <─write─┤     ├─ parse: latest tab, fill-down, normalize
+  ├─ AI Brief tab     <─write─┤     ├─ flag / next-action / brief / report
+  ├─ Ask tab          <─r/w──┤     ├─ rag: docs + tracker history → SQLite FTS5 → Claude
+  └─ AI Log tab       <─write─┘     └─ state.db (run_log, chunks, parsed history)
+Drive folder (plans, specs, LADBS, soils reports) ──read──┘
 SMTP (Gmail app password) <── weekly report
 ```
 
-The tracker is a **weekly-snapshot sheet**: each week's data lives in its
-own tab named `"wk M/D"` (e.g. `"wk 09/21"`). Each week starts as the
-prior week's rows rolled forward (same projects, updated in place), so
-row identity within the current tab is stable week to week. tracker-agent
-always operates on the **most recent** weekly tab
-(`sheets.latest_weekly_tab()`), never a fixed tab name.
-
-Other tabs are single, fixed-purpose tabs, not weekly:
-- **Change log** — read-only. An Apps Script bound to the spreadsheet logs
-  every edit (cell, old value, new value, timestamp, user) here; the agent
-  reads it, never writes it.
-- **AI Brief** — agent-owned. Replaced in full each run.
-- **Ask** — mixed: `Question`/`Project` are human-entered;
-  `Answer`/`Sources`/`Confidence`/`Status`/`Asked`/`Answered` are
-  agent-owned.
-- **AI Log** — agent-owned. Sheet-visible run history for the boss
-  (separate from the local SQLite `run_log` table, which is for
-  `tracker stats`).
-
-- **Scheduling:** macOS `launchd` (or cron) on Bronco's machine for the
-  MVP. Cloud deploy is a stretch goal.
-- **State:** `data/state.db` (SQLite) holds row snapshots (for staleness),
-  the run log, and document chunks.
-- **Retrieval:** start with SQLite FTS5 (BM25). Construction questions are
-  full of exact tokens like sheet numbers ("A-501"), spec sections
-  ("06 10 00"), and code sections, and keyword search handles those well.
-  Add embeddings only if the Phase 5 eval shows retrieval misses. This is
-  a deliberate tradeoff to document in the README.
-
-Work one phase at a time, in order. Do not start a phase until the
-previous one's "Done when" criteria are met and the user has confirmed.
-
-## Phase 0: Setup and sheet discovery
-
-**Tasks**
-- Scaffold the repo per `CLAUDE.md` (uv, ruff, pytest, typer CLI,
-  `.gitignore`, `.env.example`)
-- Google Cloud project, service account, enable Sheets and Drive APIs;
-  share the tracker and docs folder with the service account email
-  (Bronco does the console steps; instructions live in `docs/setup.md`)
-- Make a **demo copy** of the tracker with fake projects, used for all
-  development
-- `tracker inspect`: list tabs, headers, row count, and 3 sample rows per
-  tab, and report which weekly tab it resolves as "latest" (the sample
-  rows are printed to the terminal, never saved)
-- Generate a draft `config/sheet.yaml` from the headers; Bronco edits it
-  to map meaning:
-
-```yaml
-weekly_tabs:
-  name_pattern: "wk {M}/{D}"     # tab naming convention
-  key_column: "Project"           # unique row id within a weekly tab
-  columns:                        # semantic name -> header text in the sheet
-    project: "Project"
-    address: "Address"
-    phase: "Phase"
-    status: "Status"
-    next_milestone: "Next Milestone"
-    milestone_date: "Target Date"
-    notes: "Notes"
-    permit_status: "Permit"
-    inspection_next: "Next Inspection"
-  ai_columns:                     # columns G-H; the ONLY columns the agent may write
-    summary: "AI Summary"
-    next_action: "AI Next Action"
-    flag: "AI Flag"
-    flag_reason: "AI Flag Reason"
-    updated: "AI Updated"
-
-change_log_tab: "Change log"      # read-only, Apps Script output
-ai_brief_tab: "AI Brief"          # agent-owned, replaced in full each run
-ask_tab:
-  name: "Ask"
-  columns:
-    question: "Question"
-    project: "Project"
-  ai_columns:
-    answer: "Answer"
-    sources: "Sources"
-    confidence: "Confidence"
-    status: "Status"
-    asked: "Asked"
-    answered: "Answered"
-ai_log_tab: "AI Log"              # agent-owned, run history visible to the boss
-```
-
-**Done when:** `inspect` runs against the demo and real sheets, correctly
-identifies the latest weekly tab; `sheet.yaml` is filled in; `pytest`
-runs green with `FakeSheetClient`.
-
-## Phase 1: Status summary column
-
-**Behavior**
-- For each row, build a compact text of the mapped columns and call
-  Claude with a pydantic schema: `{summary: str <=200, next_action: str <=120}`
-- Skip rows whose snapshot hash hasn't changed since the last run (saves
-  tokens); `--force` re-runs all
-- Write `AI Summary`, `AI Next Action`, and `AI Updated` in one batch
-  update
-
-**Prompt rules:** plain language a superintendent would use; state facts
-from the row only; if information is missing, say what's missing ("No
-target date set") instead of inventing one.
-
-**Done when:** a dry run shows sensible diffs on the demo sheet; unchanged
-rows are skipped; a guard test proves writes to non-AI columns raise an
-error.
-
-## Phase 2: Risk flags
-
-**Deterministic rules** (in `settings.yaml`, all thresholds configurable):
-
-| Flag | Rule |
-|---|---|
-| Overdue | `milestone_date` is in the past and status isn't complete |
-| Due soon | `milestone_date` within `due_soon_days` (default 7) |
-| Stale | row hash unchanged for `stale_days` (default 10), based on the snapshot history |
-| Missing data | key fields blank (target date, next milestone) |
-| Inspection risk | next inspection within 3 days and notes mention an open blocker |
-
-- The rules decide the flag; Claude only writes `flag_reason` (<=100
-  chars), using the row plus the triggered rules
-- Apply background color to the `AI Flag` cell only (red/yellow/none)
-- An LLM-only "soft risk" check on the notes text (e.g., "waiting on
-  engineer", "sub no-show") -> yellow flag with reason. Can be turned off
-  with `llm_soft_flags: false`
-
-**Done when:** unit tests cover each rule with fixed dates (inject a
-`today` value); the dry run lists the flag counts.
-
-## Phase 3: Weekly digest email
-
-**Behavior**
-- `tracker digest` builds an email: counts by flag, top 5 risks with
-  reasons, what changed this week (from snapshot diffs), and upcoming
-  inspections and milestones for the next 14 days
-- Claude writes a 3-5 sentence opening summary; everything else is
-  templated (Jinja2 -> simple HTML + plain-text fallback)
-- Sent via SMTP with a Gmail app password; recipients are listed in
-  `settings.yaml`
-- A "Sent by tracker-agent, read-only summary of <sheet link>" footer
-- Schedule: Fridays at 7am PT via launchd
-
-**Done when:** `--dry-run` writes `out/digest-YYYY-MM-DD.html` for review;
-a test send goes to Bronco only before the boss is added.
-
-## Phase 4: RAG "Ask" tab
-
-**Ingest** (`tracker ingest`)
-- Source: a Drive folder set in settings, with subfolders per project
-  (e.g., `/<Project>/specs`, `/plan-check`, `/code`)
-- Download PDFs, extract text per page with pymupdf, and keep metadata:
-  `project, doc_name, page, doc_type`
-- Chunking: split by page, then by heading or spec section where
-  detectable (regex for CSI sections like `\d{2} \d{2} \d{2}`, sheet IDs
-  like `[A-Z]{1,2}-?\d{3}`); ~800 tokens with overlap. Store the detected
-  sheet and section numbers as chunk metadata
-- Re-ingest only files whose Drive `modifiedTime` changed
-- Note: scanned drawings have little extractable text. Log pages with
-  less than 50 characters as "needs OCR" (OCR is a stretch goal)
-
-**Retrieve and answer**
-- The query goes to FTS5 BM25, filtered by project if the question names
-  one -> top 8 chunks
-- Claude answers **only** from the provided chunks, with a schema of
-  `{answer, citations: [{doc_name, page, section?}], confidence: high|medium|low|not_found}`
-- If the chunks don't contain the answer, the answer is "Not found in
-  project documents"
-- Citations are validated: each must match a chunk that was actually
-  retrieved; drop any that don't and lower the confidence
-
-**Ask tab**
-
-| Question | Project (optional) | Answer | Sources | Confidence | Status | Asked | Answered |
-|---|---|---|---|---|---|---|---|
-
-- `tracker watch` polls every 60s for rows where Question is filled and
-  Status is blank, answers them, and sets Status = `answered` (or
-  `error`). The Ask tab's Answer through Answered columns are agent-owned
-- `tracker ask "..."` does the same from the CLI for testing
-
-**Done when:** 10 hand-checked questions on the demo docs return correct
-citations; "not found" behavior is verified on questions that are out of
-scope.
-
-## Phase 5: Eval, metrics, portfolio polish
-
-**Eval** (`evals/questions.yaml`, 30-50 items, written from REAL project
-docs but kept out of the public repo; a public version uses the demo docs)
-
-```yaml
-- q: "What is the required edge nailing for the shear wall on sheet S-201?"
-  project: demo-1
-  expect_source: {doc_name: "structural.pdf", page: 4}
-  expect_answer_contains: ["8d", "4\" o.c."]
-  type: lookup            # lookup | code | cross-doc | not_found
-```
-
-- Metrics: retrieval hit@8 (the expected source is in the retrieved
-  chunks), citation accuracy, answer correctness (keyword match + a
-  Claude-as-judge pass), and the not-found precision
-- `tracker eval` prints a table and saves `evals/results/<date>.json`
-- **Decision point:** if hit@8 is below ~85%, add embeddings (hybrid BM25
-  + vector) and re-run. Record before and after numbers
-
-**Metrics** (`tracker stats`, from `run_log`): runs, rows summarized,
-flags raised by type, questions answered, tokens and $ cost, and an
-estimated hours saved (configurable minutes-per-task x count)
-
-**README:** the problem, a screenshot of the demo sheet, the architecture
-diagram, the guardrails, the eval table, the BM25-vs-embeddings decision,
-and cost per week
+**Retrieval:** SQLite FTS5 (BM25) first. Questions here are full of exact tokens (sheet numbers, sub names, "bottom inspection", "recompaction"), which keyword search handles well. Add embeddings only if the eval shows misses. This decision goes in the README.
 
 ---
 
-## Stretch (after MVP)
+## Phase 0: Setup and parsing
 
-- Plan check intake: drop an LADBS correction PDF into Drive -> one
-  tracker row per correction, with owner and due date (writes to a new
-  agent-owned tab, not to Projects)
-- Submittal log generation from spec sections
-- OCR for scanned drawings; sheet-index extraction from title blocks
-- Deploy to Cloud Run plus Cloud Scheduler so it doesn't depend on the
-  laptop being awake
+**Tasks**
+- Scaffold the repo per `CLAUDE.md`
+- Google Cloud service account; enable the Sheets and Drive APIs; share the spreadsheet and docs folder with the service account. Claude Code writes `docs/setup.md` with the steps; Bronco does the console work
+- **Demo spreadsheet:** a copy with invented subs, address, and notes, but the same structure, tab-naming mess, and change log format. All development runs against it
+- `tracker inspect`: list the tabs, classify each (`weekly`, `changelog`, `ignored`, `other`), print the detected latest weekly tab, header row index, column mapping, and group and item counts
+- **Weekly tab parser**
+  - Regex (case-insensitive): `^\s*(wk|week)\s*(of\s*)?(\d{1,2})/(\d{1,2})\s*$`. Ignore `Copy of …`
+  - Resolve the year: walk tabs in order, and when the month goes backwards, increment the year (7/28 … 12/29 → 1/5 is the next year). `settings.yaml` can override
+  - Find the header row by searching the first 10 rows for a row containing `SUBCONTRACTOR` and `ITEM`
+  - Map columns by header, **with a positional fallback for the blank-header DATE column** (the column between ITEM and STATUS). Also suggest that Bronco type `DATE` into that header cell himself
+  - Fill SUBCONTRACTOR down; skip fully blank rows
+  - Normalize values: multi-select → last value ("Blocked, Completed" → Completed, and log a warning); trim; parse dates; treat blank, TBD, and n/a as missing
+  - Output: `list[Item]` with `sub, item, date, status, details, notes, tab, row`
+- **Change log parser** → `list[Change]`; match changes to items by `(Subcontractor (Current), Item (Current))`, normalized, because row numbers shift between weeks
+
+`config/sheet.yaml`:
+```yaml
+spreadsheets:
+  - project_id: project-1            # slug; keep real project names out of the public repo; used in the Ask tab and RAG filters
+    sheet_id_env: SHEET_ID           # real ID lives in .env
+changelog_tab: auto                  # detect by header "Timestamp, User, Sheet Name"
+weekly_tab_regex: '^\s*(wk|week)\s*(of\s*)?(\d{1,2})/(\d{1,2})\s*$'
+ignore_tab_regex: '^copy of'
+columns:
+  sub: SUBCONTRACTOR
+  item: ITEM
+  date: {header: DATE, fallback_after: ITEM}
+  status: STATUS
+  details: DETAILS
+  notes: NOTES
+ai_columns:                          # appended right of NOTES on the latest weekly tab ONLY
+  flag: "AI Flag"
+  next_action: "AI Next Action"
+agent_tabs: ["AI Brief", "Ask", "AI Log"]   # fully agent-owned
+done_status: [Completed, Cancelled]
+ball_in_our_court: [Need to Respond, Needs Clarification, Seeking Approval]
+waiting_on_others: [Waiting for Response, Reached out, "No Answer – Followed Up"]
+```
+
+**Done when:** `inspect` correctly parses every weekly tab in the demo and real sheets (the item counts are plausible, no unmapped columns); tests cover tab-name variants, fill-down, year rollover, and multi-select cleanup.
+
+## Phase 1: Flags and next action (inline, on the latest weekly tab)
+
+**Deterministic rules**, evaluated per item; thresholds in `settings.yaml`:
+
+| Flag | Rule |
+|---|---|
+| 🔴 Overdue | `date` < today and status not in `done_status` |
+| 🔴 Blocked | status = Blocked |
+| 🟠 Our move | details in `ball_in_our_court` for > `our_move_days` (default 2) per the change log |
+| 🟡 Chase | details in `waiting_on_others` for > `chase_days` (default 4) |
+| 🟡 Due soon | `date` within `due_soon_days` (7) and status = Not started |
+| 🟡 Stale | no change-log entry for this item in `stale_days` (10) and not done |
+| ⚪ Needs date | not done and no date |
+| ⚪ Inconsistent | status Completed but details ≠ Done!, or the reverse |
+
+- The rules pick the flag (worst one wins). Claude writes **one** `next_action` line (≤ 100 chars) from the item, its notes, the triggered rules, and its last 3 change-log entries. Example shape: "Text <sub> for the sewer connection answer; waiting 6 days."
+- Rows with no flag and a done status get a blank next action
+- Writes go only to `AI Flag` and `AI Next Action`, in one batch; the flag cell background is colored
+- Because tabs get duplicated weekly, AI columns may carry forward from last week. Every run clears and rewrites these two columns on the latest tab, so stale text never survives a run
+
+**Done when:** unit tests cover each rule with an injected `today`; a dry run on the demo shows the flag counts and a sample of next actions; the allow-list test proves A–F can't be written.
+
+## Phase 2: AI Brief tab
+
+A fully agent-owned tab, rewritten every run:
+- **Project snapshot** (3–5 sentences): phase, what moved this week, the top risks, and the next inspection or milestone
+- **By subcontractor** table: sub | open items | worst flag | one-line status | last activity date
+- **Waiting on** list: grouped by who has the ball (us vs. each sub vs. the city)
+- **Cycle stats** from the change log: median days items sit in "Waiting for Response" per sub, and items completed this week
+- A footer: "Generated <timestamp> from tab <wk M/D>. Read-only; edit the weekly tab, not this one."
+
+**Done when:** the brief on the demo sheet reads correctly to a person who hasn't seen the tracker.
+
+## Phase 3: Weekly report email (and optional week rollover)
+
+- `tracker report` drafts the weekly report the tracker title already implies: a narrative summary, completed this week (from the change log), in progress, blocked or at risk with reasons, and upcoming dates for the next 14 days
+- Claude writes the narrative; everything else is templated (Jinja2 → HTML + plain text)
+- SMTP via a Gmail app password; the recipients list starts as **Bronco only**
+- Schedule: Friday 7am PT
+
+**Optional `tracker roll-week`** (dry-run by default; needs `--apply`): duplicate the latest weekly tab as `wk M/D` for the coming Monday, clear the AI columns, and keep the structure identical. It never deletes items; the humans decide what to prune. This saves the weekly copy-and-rename chore and fixes the tab-naming drift.
+
+**Done when:** `--dry-run` writes `out/report-YYYY-MM-DD.html`; Bronco approves a test send before the boss is added.
+
+## Phase 4: RAG "Ask" tab
+
+**Sources**
+1. **Drive docs:** plans, specs, LADBS corrections, soils and compaction reports, permits. Structure: `/<project_id>/{plans,specs,city,reports}`
+2. **Tracker history:** every item's notes across all weekly tabs, plus the change log, indexed as dated chunks (`project, sub, item, tab/week, date`). This answers questions like "When did the bottom inspection pass?", "What did we decide about the garage footings?", and "What's the history with the sewer connection?"
+
+**Ingest** (`tracker ingest`)
+- PDFs: pymupdf per page; chunk by page, then by heading, CSI section (`\d{2} \d{2} \d{2}`), or sheet ID (`[A-Z]{1,2}-?\d{3}`), about 800 tokens. Detected sections go into metadata. Pages with less than 50 characters of text are logged as "needs OCR"
+- Tracker history: one chunk per (item, week) with the notes text, plus change events; de-duplicate identical notes carried forward across weeks and keep the first and last week each note was seen
+- Re-ingest only changed files (Drive `modifiedTime`) and new weeks
+
+**Answer**
+- FTS5 BM25 with an optional project filter, top 8 chunks → Claude answers only from those chunks. The schema is `{answer, citations[{source, page|week, section?}], confidence: high|medium|low|not_found}`
+- Validate the citations against the retrieved chunks; drop any that don't match and lower the confidence
+- No support in the chunks → "Not found in project documents or tracker history"
+
+**Ask tab:** `Question | Project | Answer | Sources | Confidence | Status | Asked | Answered`. `tracker watch` polls every 60s for a filled Question with a blank Status. `tracker ask "…"` is the CLI version.
+
+**Done when:** 10 hand-checked questions (5 from docs, 5 from tracker history) return correct citations, and out-of-scope questions return not-found.
+
+## Phase 5: Eval, backtest, metrics, README
+
+**RAG eval:** `evals/questions.yaml` with 30–50 items of types `lookup | history | code | cross-source | not_found`. Measure retrieval hit@8, citation accuracy, answer correctness (keyword match + a Claude-as-judge pass), and not-found precision. The real-data eval stays private; the public repo uses the demo. If hit@8 is below ~85%, add embeddings (hybrid) and record the before and after numbers.
+
+**Flag backtest** (the strongest resume piece): use the change log to rebuild the tracker's state on every Monday from Aug to Dec 2025, run the flag rules as of that date, and check the outcomes. Did 🔴/🟠 items actually slip (their date moved, or they finished late)? Were items that slipped flagged beforehand? Report precision and recall and the lead time in days, then tune the thresholds from it.
+
+**Metrics** (`tracker stats` from `run_log`): runs, items flagged by type, next actions written, questions answered, tokens and $ per week, and an estimated hours saved (configurable minutes per task × count).
+
+**README:** the problem, demo-sheet screenshots (before and after), the architecture diagram, guardrails, the eval and backtest tables, the BM25-vs-embeddings decision, and weekly cost.
+
+---
+
+## Phase 6: Prove the seam (second adapter)
+
+Do this once Phases 1–3 are working, not at the end. It's the phase that turns a one-off script into a portfolio piece.
+
+1. **CSV adapter first** (a day's work): read an exported tracker into `Item`s, declare `READ_ITEMS` only, and confirm the flags and report still run with `WRITE_*` and `READ_HISTORY` off. This is what flushes out the hidden Sheets assumptions.
+2. **Then one real API** — Procore's sandbox if you can get access, otherwise Airtable or monday, both of which have free tiers and quick auth.
+3. Record the numbers for the README: lines of adapter code, how many feature files changed (the target is zero), and time to first working run.
+4. `tracker sources` lists the registered adapters with their capabilities; `--source csv` overrides the active one per run.
+
+**Done when:** the same commands produce a correct brief and report from two different sources, and the contract suite passes for both.
+
+## Stretch
+
+- Plan check intake: an LADBS correction PDF → items on a new agent-owned tab
+- Multiple projects: several spreadsheets in `sheet.yaml`, one combined report
+- Sub responsiveness scorecard from the change log
+- OCR for scanned plan sheets; cloud deploy (Cloud Run + Scheduler)
 
 ## Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Boss edits or reorders columns | Header-based mapping; `inspect` warns on mapping drift and stops writes |
-| Agent overwrites human data | `ai_columns` allow-list enforced in one write function, plus a test |
-| Hallucinated code or spec answers | Answers only from retrieved chunks; citation validation; "not found" path; eval |
-| Client data leaking into the public repo | Demo sheet and docs; gitignored `data/`; fake fixtures only |
-| Laptop asleep -> no runs | launchd catches up missed runs; Cloud Run is a stretch goal |
-| Cost creep | Skip unchanged rows; log tokens; weekly cost in `stats` |
+| Tab naming drift or new layouts | Regex + header detection; `inspect` warns and **stops writes** if the latest tab can't be parsed confidently |
+| Agent overwrites human data | Allow-list: AI columns on the latest weekly tab + agent-owned tabs only, enforced in one function and tested |
+| Stale AI text copied into the new week's tab | Clear and rewrite the AI columns every run; `roll-week` clears them |
+| Change log row numbers don't match after duplication | Join on (sub, item), not row |
+| Hallucinated answers | Chunk-only answering, citation validation, a not-found path, the eval |
+| Real names and address leaking | Demo spreadsheet for the repo; gitignored `data/`; fake fixtures |
+| The sheet is shared "anyone with the link" | Recommend restricting sharing to named people plus the service account |
+| Laptop asleep | launchd catches up missed runs; cloud deploy is a stretch goal |
 
-**Before Phase 1 touches the real sheet:** confirm with the boss that
-project data can be sent to the Anthropic API.
+**Before anything writes to the real sheet:** confirm with the boss that project data can be sent to the Anthropic API and that two AI columns plus three tabs are OK to add.
 
-## Guardrails (non-negotiable, apply to every phase)
+---
 
-1. Never write to a column not listed under `ai_columns` in `sheet.yaml`.
-   All writes go through `sheets.write_ai_cells()`, which enforces this.
-2. `--dry-run` must work for every write command: prints the diff, writes
-   nothing.
-3. Batch writes — one `batch_update` per run, never per cell.
-4. No real project data in git: not in tests, fixtures, evals, README, or
-   commit messages. `.env`, `credentials/`, `data/`, `*.db` are gitignored.
-   Fixtures use invented projects and addresses.
-5. RAG answers must cite a source or say "Not found in project documents."
-6. Every LLM call goes through `llm.py` so tokens/latency/cost are logged
-   to `run_log`.
-7. Deterministic logic first, LLM second.
+## Kickoff prompt for Claude Code
+
+> Read CLAUDE.md and SPEC.md, including "The source boundary" and "Portability". We're doing Phase 0 only. Scaffold the repo per the Layout, write `docs/setup.md` (service-account steps for me) and `docs/adapters.md` (the adapter checklist), then implement `core/models.py`, `core/capabilities.py`, `sources/base.py`, `sources/fake.py`, `config.py`, the gsheets adapter (client, weekly parser, changelog parser, allow-listed writer), the contract test suite in `tests/contract/`, and `tracker inspect`. Build test fixtures that mimic the structure described in "The tracker as it exists today", with invented names. Include tests for tab-name variants, year rollover, SUBCONTRACTOR fill-down, the blank DATE header fallback, and multi-select status cleanup. Stop after Phase 0 and tell me what to do in the Google console.
+
+For each later phase: "Phase N per SPEC.md. Show me the plan first, then implement with tests, and dry-run against the demo sheet before finishing."
