@@ -35,10 +35,25 @@ Claude Code cannot do this part.
 Don't copy the real tracker for this — a hand-scrubbed copy is exactly how
 a real name or address ends up in the demo. Instead, generate one from
 scratch, seeded entirely with the same invented data the test fixtures
-use (`tests/fixtures/demo_sheet.py`):
+use (`tests/fixtures/demo_sheet.py`).
+
+Service accounts get effectively no storage quota in their own "My
+Drive", so the sheet has to be created inside a **Shared Drive**
+(Workspace accounts only) that the service account is a member of:
+
+1. https://drive.google.com → **Shared drives** → **+ New**. Name it
+   e.g. `tracker-agent`.
+2. Open it → **Manage members** → add the service account email from
+   step 3.5 with **Content Manager** (or **Manager**) access.
+3. Copy the Shared Drive's ID out of its URL:
+   `https://drive.google.com/drive/folders/<SHARED_DRIVE_ID>`.
+
+Then:
 
 ```bash
-uv run python scripts/make_demo_sheet.py --share you@example.com
+uv run python -m scripts.make_demo_sheet \
+  --shared-drive <SHARED_DRIVE_ID> \
+  --share you@example.com
 ```
 
 `--share` also grants your own Google account Editor access so you can

@@ -7,11 +7,17 @@ address leaking into the demo. Prints the new sheet's ID to put in
 .env as SHEET_ID_DEMO.
 
 Usage:
-    uv run python scripts/make_demo_sheet.py [--share you@example.com]
+    uv run python -m scripts.make_demo_sheet --shared-drive <ID> [--share you@example.com]
 
 Requires GOOGLE_SERVICE_ACCOUNT_FILE (see docs/setup.md) and a service
 account with the Drive file-creation scope, already true of the scopes
 in sources/gsheets/client.py.
+
+Service accounts get ~0 usable quota in their own "My Drive", so the
+sheet must be created inside a Shared Drive (Workspace-only) that the
+service account is a member of — see docs/setup.md step 4. Pass that
+Shared Drive's ID (from its URL: drive.google.com/drive/folders/<ID>)
+via --shared-drive.
 """
 
 from __future__ import annotations
@@ -45,6 +51,13 @@ TABS: list[tuple[str, list[list[str]]]] = [
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--shared-drive",
+        required=True,
+        help="ID of a Shared Drive the service account is a member of. Service "
+        "accounts have ~0 quota in their own My Drive, so the sheet must be "
+        "created here instead (see docs/setup.md step 4).",
+    )
+    parser.add_argument(
         "--share",
         help="Also share the new sheet (Editor) with this email — your own account, "
         "so you can open it in a browser. The service account already owns it.",
@@ -60,7 +73,7 @@ def main() -> None:
     creds = Credentials.from_service_account_file(str(credentials_file), scopes=SCOPES)
     gc = gspread.authorize(creds)
 
-    spreadsheet = gc.create("Tracker (demo)")
+    spreadsheet = gc.create("Tracker (demo)", folder_id=args.shared_drive)
 
     first = True
     for name, grid in TABS:
