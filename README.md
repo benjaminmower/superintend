@@ -6,7 +6,14 @@ week, and a change-log tab that already records every edit. The sheet
 stays the only interface the team uses. This service flags at-risk
 items, writes next actions, keeps an AI Brief tab, drafts the weekly
 report email, and answers questions from project documents and tracker
-history (RAG) with citations.
+history (RAG) with citations. A later phase adds an agent that
+investigates each flagged item (history, related tasks, sub
+responsiveness) before deciding, measured against the deterministic
+rules on real project history rather than assumed to be better.
+
+**Status:** Phase 0 (parsing) and Phase 1 (`tracker flag`) are done and
+running against a real, active construction project — not just the demo.
+Phases 2–7 are ahead; see `SPEC.md` for the full roadmap.
 
 Full scope, the observed sheet structure, and phases: see `SPEC.md`.
 Repo conventions and guardrails: see `CLAUDE.md`. Work one phase at a
@@ -35,6 +42,11 @@ actually changed since the last run — an unchanged item reuses its
 stored text instead of asking the LLM again and getting different
 wording for the same situation. `--no-llm` runs the rules only, with no
 API key needed.
+
+Two rows that share the exact same subcontractor and item text within
+one week are flagged `⚠️ Duplicate — consolidate with row N` instead of
+guessing they're the same task — found running against a real, messy
+280-item sheet, not the clean demo fixture.
 
 Google Cloud / service account setup: see `docs/setup.md`.
 
