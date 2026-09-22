@@ -59,17 +59,45 @@ class Settings(BaseModel):
     rag: RagSettings = RagSettings()
 
 
-class SheetConfig(BaseModel):
-    """Single-tab column mapping for the Projects tab (config/sheet.yaml)."""
+class WeeklyTabConfig(BaseModel):
+    """Column mapping shared by every "wk M/D" weekly snapshot tab."""
 
-    tab: str
+    name_pattern: str = "wk {M}/{D}"
     key_column: str
     columns: dict[str, str] = {}
     ai_columns: dict[str, str] = {}
 
     def ai_column_headers(self) -> set[str]:
-        """The only headers write_ai_cells() may touch."""
+        """The only headers write_ai_cells() may touch on a weekly tab."""
         return set(self.ai_columns.values())
+
+
+class AskTabConfig(BaseModel):
+    """Column mapping for the Ask tab (Question in, Answer/etc. out)."""
+
+    name: str = "Ask"
+    columns: dict[str, str] = {}
+    ai_columns: dict[str, str] = {}
+
+    def ai_column_headers(self) -> set[str]:
+        """The only headers write_ai_cells() may touch on the Ask tab."""
+        return set(self.ai_columns.values())
+
+
+class SheetConfig(BaseModel):
+    """Tab roles for the tracker spreadsheet (config/sheet.yaml).
+
+    weekly_tabs maps the recurring "wk M/D" tabs; change_log_tab is
+    read-only (an Apps Script writes it); ai_brief_tab and ai_log_tab are
+    wholly agent-owned (no allow-list — every cell is fair game); ask_tab
+    is a mix of human-owned (Question) and agent-owned columns.
+    """
+
+    weekly_tabs: WeeklyTabConfig
+    change_log_tab: str
+    ai_brief_tab: str
+    ask_tab: AskTabConfig
+    ai_log_tab: str
 
 
 def load_settings(path: Path | None = None) -> Settings:

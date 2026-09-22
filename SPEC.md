@@ -27,13 +27,37 @@ usage metrics.
 ## Architecture
 
 ```
-Google Sheet (tracker)  <--gspread-->  tracker-agent (Python CLI, run by cron/launchd)
-   |  Projects tab (human columns + AI columns)          |-- summarize / flag / digest
-   |  Ask tab (Question | Answer | Sources | Status)     |-- watch (polls Ask tab)
-   |  AI Log tab (run history, optional)                  |-- rag: ingest -> SQLite FTS5 -> Claude
-Google Drive folder (project docs: PDFs)  ---------------+
-SMTP (Gmail app password)  <-- weekly digest
+Project spreadsheet
+  ├─ Change log tab   ──read──┐   (an Apps Script writes edit history here:
+  ├─ wk M/D tabs      ──read──┤    cell, old value, new value, timestamp, user)
+  │    └─ AI cols G–H <─write─┤
+  ├─ AI Brief tab     <─write─┤   tracker-agent (Python CLI, launchd/cron)
+  ├─ Ask tab          <─r/w──┤     ├─ parse: latest tab, fill-down, normalize
+  └─ AI Log tab       <─write─┘     ├─ flag / next-action / brief / report
+                                     ├─ rag: docs + tracker history → SQLite FTS5 → Claude
+Google Drive folder (plans, specs,   └─ state.db (run_log, chunks, parsed history)
+  LADBS, soils reports) ──read──┘
+SMTP (Gmail app password) <── weekly report
 ```
+
+The tracker is a **weekly-snapshot sheet**: each week's data lives in its
+own tab named `"wk M/D"` (e.g. `"wk 09/21"`). Each week starts as the
+prior week's rows rolled forward (same projects, updated in place), so
+row identity within the current tab is stable week to week. tracker-agent
+always operates on the **most recent** weekly tab
+(`sheets.latest_weekly_tab()`), never a fixed tab name.
+
+Other tabs are single, fixed-purpose tabs, not weekly:
+- **Change log** — read-only. An Apps Script bound to the spreadsheet logs
+  every edit (cell, old value, new value, timestamp, user) here; the agent
+  reads it, never writes it.
+- **AI Brief** — agent-owned. Replaced in full each run.
+- **Ask** — mixed: `Question`/`Project` are human-entered;
+  `Answer`/`Sources`/`Confidence`/`Status`/`Asked`/`Answered` are
+  agent-owned.
+- **AI Log** — agent-owned. Sheet-visible run history for the boss
+  (separate from the local SQLite `run_log` table, which is for
+  `tracker stats`).
 
 - **Scheduling:** macOS `launchd` (or cron) on Bronco's machine for the
   MVP. Cloud deploy is a stretch goal.
@@ -58,34 +82,53 @@ previous one's "Done when" criteria are met and the user has confirmed.
   (Bronco does the console steps; instructions live in `docs/setup.md`)
 - Make a **demo copy** of the tracker with fake projects, used for all
   development
-- `tracker inspect`: list tabs, headers, row count, and 3 sample rows (the
-  sample rows are printed to the terminal, never saved)
+- `tracker inspect`: list tabs, headers, row count, and 3 sample rows per
+  tab, and report which weekly tab it resolves as "latest" (the sample
+  rows are printed to the terminal, never saved)
 - Generate a draft `config/sheet.yaml` from the headers; Bronco edits it
   to map meaning:
 
 ```yaml
-tab: Projects
-key_column: "Project"          # unique row id
-columns:                        # semantic name -> header text in the sheet
-  project: "Project"
-  address: "Address"
-  phase: "Phase"
-  status: "Status"
-  next_milestone: "Next Milestone"
-  milestone_date: "Target Date"
-  notes: "Notes"
-  permit_status: "Permit"
-  inspection_next: "Next Inspection"
-ai_columns:                     # the ONLY columns the agent may write; created if missing
-  summary: "AI Summary"
-  next_action: "AI Next Action"
-  flag: "AI Flag"
-  flag_reason: "AI Flag Reason"
-  updated: "AI Updated"
+weekly_tabs:
+  name_pattern: "wk {M}/{D}"     # tab naming convention
+  key_column: "Project"           # unique row id within a weekly tab
+  columns:                        # semantic name -> header text in the sheet
+    project: "Project"
+    address: "Address"
+    phase: "Phase"
+    status: "Status"
+    next_milestone: "Next Milestone"
+    milestone_date: "Target Date"
+    notes: "Notes"
+    permit_status: "Permit"
+    inspection_next: "Next Inspection"
+  ai_columns:                     # columns G-H; the ONLY columns the agent may write
+    summary: "AI Summary"
+    next_action: "AI Next Action"
+    flag: "AI Flag"
+    flag_reason: "AI Flag Reason"
+    updated: "AI Updated"
+
+change_log_tab: "Change log"      # read-only, Apps Script output
+ai_brief_tab: "AI Brief"          # agent-owned, replaced in full each run
+ask_tab:
+  name: "Ask"
+  columns:
+    question: "Question"
+    project: "Project"
+  ai_columns:
+    answer: "Answer"
+    sources: "Sources"
+    confidence: "Confidence"
+    status: "Status"
+    asked: "Asked"
+    answered: "Answered"
+ai_log_tab: "AI Log"              # agent-owned, run history visible to the boss
 ```
 
-**Done when:** `inspect` runs against the demo and real sheets;
-`sheet.yaml` is filled in; `pytest` runs green with `FakeSheetClient`.
+**Done when:** `inspect` runs against the demo and real sheets, correctly
+identifies the latest weekly tab; `sheet.yaml` is filled in; `pytest`
+runs green with `FakeSheetClient`.
 
 ## Phase 1: Status summary column
 

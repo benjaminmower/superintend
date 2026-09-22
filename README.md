@@ -5,6 +5,14 @@ The sheet stays the only interface the team uses; this service reads it,
 writes to its own AI columns, flags risk, emails a weekly digest, and
 answers questions from project documents (RAG) with citations.
 
+The tracker is a **weekly-snapshot sheet**: current data lives in a tab
+named `"wk M/D"` (e.g. `"wk 09/21"`), and a new one rolls forward each
+week. tracker-agent always operates on the most recent weekly tab. Other
+tabs are fixed and single-purpose: **Change log** (read-only, written by
+an Apps Script), **AI Brief** and **AI Log** (agent-owned), and **Ask**
+(mixed — human asks a question, agent fills in the answer). See
+`SPEC.md`'s Architecture section for the full diagram.
+
 Full scope and phases: see `SPEC.md`. Work one phase at a time, in order.
 
 ## Stack
@@ -51,14 +59,16 @@ src/tracker_agent/
   rag/ ingest.py  retrieve.py  answer.py
 config/
   settings.yaml     # model, thresholds, schedule, email recipients
-  sheet.yaml        # column mapping: which headers mean what (generated in Phase 0, then hand-edited)
+  sheet.yaml        # tab roles + column mapping (generated in Phase 0, then hand-edited):
+                     #   weekly_tabs (the "wk M/D" tabs), change_log_tab, ai_brief_tab,
+                     #   ask_tab, ai_log_tab
 evals/questions.yaml
 tests/fixtures/     # FAKE data only
 ```
 
 ## Guardrails (non-negotiable)
 
-1. **Never write to a column not listed under `ai_columns` in `sheet.yaml`.** All writes go through `sheets.write_ai_cells()`, which enforces this. Human-owned cells are read-only to this code.
+1. **Never write to a column not listed under `ai_columns` in `sheet.yaml`.** All writes go through `sheets.write_ai_cells()`, which enforces this on tabs that have an allow-list (weekly tabs, Ask). Human-owned cells are read-only to this code. `AI Brief` and `AI Log` are wholly agent-owned, so `write_ai_cells()` skips the allow-list there (pass `allowed_headers=None`).
 2. **`--dry-run` must work for every write command.** It prints the diff of what would change and writes nothing.
 3. **Batch writes.** One `batch_update` per run, not per cell (Sheets API quotas).
 4. **No real project data in git.** Not in tests, fixtures, evals, README, or commit messages. `.env`, `credentials/`, `data/`, and `*.db` are gitignored. Fixtures use invented projects and addresses.
@@ -69,6 +79,7 @@ tests/fixtures/     # FAKE data only
 ## Conventions
 
 - Map columns by header name through `sheet.yaml`, never by letter or index. The boss may reorder columns.
+- Always resolve the current weekly tab with `sheets.latest_weekly_tab()`; never hardcode a tab name.
 - Treat blank, "TBD", "n/a", and malformed dates as missing, not as errors. Log them.
 - LLM outputs use pydantic schemas; validate, and on failure retry once, then skip the row and log it.
 - Keep AI cell text short: summaries ≤ 200 characters, flag reasons ≤ 100.

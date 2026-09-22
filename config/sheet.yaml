@@ -1,24 +1,49 @@
 # Column mapping, generated as a starting point by `tracker inspect`,
 # then hand-edited. Map by header TEXT, never by letter or index — the
 # boss may reorder columns.
+#
+# The tracker is a weekly-snapshot sheet: each week's data lives in its
+# own tab named "wk M/D" (e.g. "wk 09/21"). tracker-agent always operates
+# on the most recent weekly tab (see sheets.latest_weekly_tab()). The
+# other tabs are fixed, single-purpose tabs.
 
-tab: Projects
-key_column: "Project"          # unique row id
+weekly_tabs:
+  name_pattern: "wk {M}/{D}"     # tab naming convention; parsed to find "latest"
+  key_column: "Project"           # unique row id within a weekly tab
 
-columns:                        # semantic name -> header text in the sheet
-  project: "Project"
-  address: "Address"
-  phase: "Phase"
-  status: "Status"
-  next_milestone: "Next Milestone"
-  milestone_date: "Target Date"
-  notes: "Notes"
-  permit_status: "Permit"
-  inspection_next: "Next Inspection"
+  columns:                        # semantic name -> header text in the sheet
+    project: "Project"
+    address: "Address"
+    phase: "Phase"
+    status: "Status"
+    next_milestone: "Next Milestone"
+    milestone_date: "Target Date"
+    notes: "Notes"
+    permit_status: "Permit"
+    inspection_next: "Next Inspection"
 
-ai_columns:                     # the ONLY columns the agent may write; created if missing
-  summary: "AI Summary"
-  next_action: "AI Next Action"
-  flag: "AI Flag"
-  flag_reason: "AI Flag Reason"
-  updated: "AI Updated"
+  ai_columns:                     # columns G-H; the ONLY columns the agent may write
+    summary: "AI Summary"
+    next_action: "AI Next Action"
+    flag: "AI Flag"
+    flag_reason: "AI Flag Reason"
+    updated: "AI Updated"
+
+change_log_tab: "Change log"      # read-only; an Apps Script logs edits here
+
+ai_brief_tab: "AI Brief"          # agent-owned; replaced in full each run
+
+ask_tab:
+  name: "Ask"
+  columns:
+    question: "Question"
+    project: "Project"
+  ai_columns:                     # everything past the human-entered question
+    answer: "Answer"
+    sources: "Sources"
+    confidence: "Confidence"
+    status: "Status"
+    asked: "Asked"
+    answered: "Answered"
+
+ai_log_tab: "AI Log"              # agent-owned; run history visible to the boss

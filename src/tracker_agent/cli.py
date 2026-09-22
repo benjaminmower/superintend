@@ -6,6 +6,7 @@ import typer
 
 from tracker_agent.config import load_settings
 from tracker_agent.gspread_client import GspreadClient
+from tracker_agent.sheets import NoWeeklyTabFoundError, latest_weekly_tab
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -24,6 +25,13 @@ def inspect(demo: bool = typer.Option(True, help="Use SHEET_ID_DEMO instead of S
         raise typer.Exit(1)
 
     client = GspreadClient(sheet_id)
+
+    try:
+        latest = latest_weekly_tab(client)
+        typer.echo(f"Latest weekly tab: {latest}\n")
+    except NoWeeklyTabFoundError:
+        typer.echo("No weekly tab (\"wk M/D\") found yet.\n", err=True)
+
     for tab in client.tab_names():
         headers = client.headers(tab)
         rows = client.read_rows(tab)
